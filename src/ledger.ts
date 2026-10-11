@@ -18,7 +18,8 @@ export interface LedgerLine {
    * router held by default rather than by policy, `"skipped-tool-result"`
    * when the request only continued an agentic loop and was not
    * classified, `"side-request"` for Claude Code's tool-less side calls
-   * (logged for cost, never routed), or `"unknown-model"`
+   * (logged for cost, never routed), `"manual-switch"` for the turn on
+   * which the user changed the model themselves (never classified), or `"unknown-model"`
    * when no tier could be resolved for the requested model - kept
    * distinct so a broken API key or an unrecognized model doesn't
    * silently masquerade as normal routing. */

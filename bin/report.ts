@@ -10,6 +10,7 @@ export interface Summary {
   suggested: number;
   classifierUnavailable: number;
   skippedToolResult: number;
+  manualSwitch: number;
   sideRequests: number;
   unknownModel: number;
   totalActualUsd: number;
@@ -33,6 +34,7 @@ export function summarize(lines: LedgerLine[]): Summary {
     suggested: lines.filter((l) => l.decision === "upgrade-suggested").length,
     classifierUnavailable: lines.filter((l) => l.decision === "classifier-unavailable").length,
     skippedToolResult: lines.filter((l) => l.decision === "skipped-tool-result").length,
+    manualSwitch: lines.filter((l) => l.decision === "manual-switch").length,
     sideRequests: lines.filter((l) => l.decision === "side-request").length,
     unknownModel: lines.filter((l) => l.decision === "unknown-model").length,
     totalActualUsd,
@@ -87,6 +89,11 @@ export function reportMain(argv: string[]): void {
   if (s.skippedToolResult > 0) {
     console.log(
       `  skipped-tool-result: ${s.skippedToolResult} (agentic-loop steps, not classified - stayed on the tier chosen for the user message)`
+    );
+  }
+  if (s.manualSwitch > 0) {
+    console.log(
+      `  manual-switch: ${s.manualSwitch} (turns where you changed the model; honored, not classified, and pinned against automatic downgrades)`
     );
   }
   if (s.unknownModel > 0) {

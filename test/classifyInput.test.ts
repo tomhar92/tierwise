@@ -6,6 +6,7 @@ import {
   isToolResultContinuation,
   sanitizeForClassifier,
 } from "../src/classifyInput.js";
+import { buildUpgradeNoticeText, isRouterNote } from "../src/upgradeNote.js";
 
 test("keeps scanning back when the last user message is only tool results", () => {
   const messages = [
@@ -82,4 +83,23 @@ test("a request with no tools is a side request; one with tools is not", () => {
   assert.equal(isSideRequest({}), true);
   assert.equal(isSideRequest({ tools: [] }), true);
   assert.equal(isSideRequest({ tools: [{ name: "Read" }] }), false);
+});
+
+test("leaves the router's own upgrade note out of the classifier payload", () => {
+  const note = buildUpgradeNoticeText("opus", 0.42);
+  const messages = [
+    { role: "user", content: "hard question" },
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "an answer" },
+        { type: "text", text: note },
+      ],
+    },
+  ];
+  assert.deepEqual(sanitizeForClassifier(messages), [
+    { role: "user", content: "hard question" },
+    { role: "assistant", content: [{ type: "text", text: "an answer" }] },
+  ]);
+  assert.equal(isRouterNote("a model reply that happens to mention a Router note"), false);
 });

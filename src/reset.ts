@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import type { MessageMark } from "./types.js";
+
 // Claude Code moves the `cache_control` breakpoint marker onto whichever
 // content block is now the end of the cacheable prefix, so the same
 // logical message can carry a different `cache_control` field turn to
@@ -22,19 +25,30 @@ export function stripCacheControl(value: unknown): unknown {
   return value;
 }
 
-export function detectReset(
-  lastMessages: unknown[] | undefined,
-  currentMessages: unknown[]
-): boolean {
-  if (!lastMessages || lastMessages.length === 0) return true;
-  if (currentMessages.length < lastMessages.length) return true;
-  for (let i = 0; i < lastMessages.length; i++) {
-    if (
-      JSON.stringify(stripCacheControl(currentMessages[i])) !==
-      JSON.stringify(stripCacheControl(lastMessages[i]))
-    ) {
-      return true;
-    }
+// Hashing the first `count` messages, each framed by its length so two
+// different message lists can never concatenate to the same byte stream.
+function digestPrefix(messages: unknown[], count: number): string {
+  const hash = createHash("sha256");
+  for (let i = 0; i < count; i++) {
+    const text = JSON.stringify(stripCacheControl(messages[i])) ?? "null";
+    hash.update(`${text.length}:`);
+    hash.update(text);
   }
-  return false;
+  return hash.digest("hex");
+}
+
+export const EMPTY_MARK: MessageMark = { count: 0, digest: "" };
+
+export function markMessages(messages: unknown[]): MessageMark {
+  return { count: messages.length, digest: digestPrefix(messages, messages.length) };
+}
+
+/** True unless `currentMessages` begins with exactly the messages that
+ * `last` was taken from (ignoring cache_control placement). Only the mark is
+ * kept between turns, not the messages, so a long-lived proxy does not hold
+ * every tracked conversation's full history in memory. */
+export function detectReset(last: MessageMark | undefined, currentMessages: unknown[]): boolean {
+  if (!last || last.count === 0) return true;
+  if (currentMessages.length < last.count) return true;
+  return digestPrefix(currentMessages, last.count) !== last.digest;
 }

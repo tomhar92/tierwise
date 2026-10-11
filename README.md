@@ -18,9 +18,11 @@ This router is built around that constraint:
 - **Downgrades** (to a cheaper tier) only happen automatically when the
   projected savings clear the one-time switch tax within a conservative
   number of turns.
-- **Upgrades** (to a pricier tier) are never applied automatically —
-  they're surfaced as an in-context note with the estimated cost, and
-  it's your call whether to act on it.
+- **Upgrades** (to a pricier tier) are applied at those same reset
+  moments, when the classifier is confident enough. Mid-session they are
+  never applied automatically: the router appends a note under the model's
+  reply with the estimated cost and the `/model` command, and it's your
+  call whether to act on it.
 - Both are free to apply immediately at the moments the cache was going
   to be rebuilt anyway (session start, `/clear`, `/compact`).
 - Every turn's *real* token usage and cost gets logged, so you can
@@ -176,25 +178,37 @@ numbers from the report.
 
 ## Known limitations (v1)
 
-- Conversation identity is a hash of the conversation's first message,
-  not the TCP connection (Anthropic's API sends no session ID, and Claude
-  Code opens new connections mid-conversation and shares one between the
-  main thread and subagents). `/clear`, `/compact` and each subagent start
-  with a different first message, so they count as new conversations. Two
-  sessions that open with an identical first message would share routing
-  state. State is held in memory (the 500 most recent conversations) and is
-  lost on restart.
+- Conversation identity is the conversation's first message, not the TCP
+  connection (Anthropic's API sends no session ID, and Claude Code opens
+  new connections mid-conversation and shares one between the main thread
+  and subagents). `/clear`, `/compact` and each subagent start with a
+  different first message, so they count as new conversations. Sessions
+  that open with an identical first message are told apart by which
+  recorded history the request continues, so they stop sharing state as
+  soon as they diverge (two that start simultaneously and are still
+  identical share state until they do). A rewind or edit of an earlier
+  message does not continue the recorded history, so it starts fresh
+  state; the cache is rebuilt then anyway. Per conversation only a message
+  count and a digest are kept, not the messages. State is held in memory
+  (the 500 most recently used conversations) and is lost on restart.
 - Claude Code builds each request for the model it is using, so a request
   moved to Haiku is reshaped to match what Claude Code itself sends for
   Haiku (`src/adaptRequest.ts`: output cap, thinking mode, effort,
   `system`-role messages, beta flags). That is modelled on one captured
   Sonnet/Haiku pair and will drift as Claude Code changes; if routed
   Haiku turns start returning 400s, set `ROUTER_MIN_TIER=sonnet`.
-- The upgrade-suggestion note is injected as conversation content for the
-  model to relay, not a UI element — it depends on the model choosing to
-  mention it. It also perturbs
-  the cache prefix for the following turn, a small extra cost beyond the
-  estimate it reports.
+- The upgrade-suggestion note is added to the reply as an extra text
+  block, and only on a turn that ends normally (not when the model stops to
+  call a tool; the next turn suggests again if it still applies). Claude
+  Code keeps it in the conversation history like any other assistant text.
+  The request itself is never modified for it, so it does not touch the cache.
+  The note is left out of what is sent to the classifier.
+- When you change the model yourself (`/model ...`), that turn is honored
+  as-is and not classified (ledger decision `manual-switch`), and the
+  conversation is pinned to your choice: the router will not automatically
+  move it to a cheaper tier afterwards, though it may still suggest an
+  upgrade. A new conversation (`/clear`, `/compact`, a rewind) or another
+  `/model` starts fresh.
 - If TypeSafe errors or times out on a turn, the router holds the current
   tier and logs `decision: "classifier-unavailable"` (distinct from a
   genuine policy-driven `held`) so a broken API key doesn't quietly look
