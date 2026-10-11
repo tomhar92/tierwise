@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createConversationStore, getOrInitState, updateState } from "../src/conversationKey.js";
+import { markMessages } from "../src/reset.js";
 
 test("initializes state on first use and returns the same object on reuse", () => {
   const socket = {};
@@ -47,7 +48,7 @@ test("updateState advances tier, turn count, prefix/new/output tokens, and track
   assert.equal(state.lastPrefixTokens, 2000);
   assert.equal(state.lastNewTokens, 1000);
   assert.equal(state.lastOutputTokens, 500);
-  assert.deepEqual(state.lastMessages, messages);
+  assert.deepEqual(state.lastMark, markMessages(messages));
 });
 
 test("turnsOnCurrentTier accumulates while the tier stays the same and resets on a real change", () => {
@@ -93,4 +94,68 @@ test("two stores never share a conversation", () => {
     createConversationStore().getOrInitState({}, "sonnet", messages),
     createConversationStore().getOrInitState({}, "sonnet", messages)
   );
+});
+
+const USAGE = { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+const turn = (n: number, first = "hello") => {
+  const messages: unknown[] = [{ role: "user", content: first }];
+  for (let i = 1; i < n; i++) {
+    messages.push({ role: "assistant", content: `a${i}` }, { role: "user", content: `u${i}` });
+  }
+  return messages;
+};
+
+test("a continuing request finds its own state among sessions that opened with the same message", () => {
+  const store = createConversationStore();
+  const a = store.getOrInitState({}, "sonnet", turn(1));
+  updateState(a, "sonnet", USAGE, turn(2));
+  // Session B opened identically; once A has recorded history, B's
+  // different second message no longer continues it.
+  const bMessages = [...turn(1), { role: "assistant", content: "b-only" }, { role: "user", content: "b-follow-up" }];
+  const b = store.getOrInitState({}, "sonnet", bMessages);
+  assert.notEqual(a, b);
+  updateState(b, "sonnet", USAGE, bMessages);
+
+  // Each session's next turn lands back on its own state, in either order.
+  assert.equal(store.getOrInitState({}, "sonnet", turn(3)), a);
+  assert.equal(store.getOrInitState({}, "sonnet", [...bMessages, { role: "assistant", content: "x" }, { role: "user", content: "y" }]), b);
+});
+
+test("before any history is recorded, a second request with the same first message continues the same state", () => {
+  const store = createConversationStore();
+  const a = store.getOrInitState({}, "sonnet", turn(1));
+  updateState(a, "sonnet", USAGE, turn(1));
+  assert.equal(store.getOrInitState({}, "sonnet", turn(2)), a);
+});
+
+test("a state that never finished a turn is reused by a retry instead of leaking a new one", () => {
+  const store = createConversationStore();
+  const first = store.getOrInitState({}, "sonnet", turn(1));
+  assert.equal(store.getOrInitState({}, "sonnet", turn(1)), first);
+});
+
+test("a rewind that no longer continues the recorded history starts a fresh state", () => {
+  const store = createConversationStore();
+  const original = store.getOrInitState({}, "sonnet", turn(3));
+  updateState(original, "haiku", USAGE, turn(3));
+  const rewound = store.getOrInitState({}, "sonnet", turn(2));
+  assert.notEqual(rewound, original);
+  assert.equal(rewound.currentTier, "sonnet");
+  assert.equal(rewound.lastMark.count, 0);
+});
+
+test("keeps no message bodies, and bounds the states kept per first message", () => {
+  const store = createConversationStore();
+  const states = new Set<unknown>();
+  for (let i = 0; i < 20; i++) {
+    const messages = [...turn(1), { role: "assistant", content: "x" }, { role: "user", content: `divergent-${i}` }];
+    const state = store.getOrInitState({}, "sonnet", messages);
+    updateState(state, "sonnet", USAGE, messages);
+    assert.deepEqual(Object.keys(state.lastMark).sort(), ["count", "digest"]);
+    states.add(state);
+  }
+  assert.equal(states.size, 20);
+  // The oldest were dropped: replaying the first one finds nothing to continue.
+  const replay = [...turn(1), { role: "assistant", content: "x" }, { role: "user", content: "divergent-0" }];
+  assert.equal(store.getOrInitState({}, "sonnet", replay).lastMark.count, 0);
 });

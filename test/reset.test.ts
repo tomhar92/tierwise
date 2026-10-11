@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { detectReset } from "../src/reset.js";
+import { detectReset, markMessages } from "../src/reset.js";
 
 test("detects reset on the very first turn (no prior messages)", () => {
   assert.equal(detectReset(undefined, [{ role: "user", content: "hi" }]), true);
-  assert.equal(detectReset([], [{ role: "user", content: "hi" }]), true);
+  assert.equal(detectReset(markMessages([]), [{ role: "user", content: "hi" }]), true);
 });
 
 test("detects reset when history got shorter (compact/clear)", () => {
@@ -14,7 +14,7 @@ test("detects reset when history got shorter (compact/clear)", () => {
     { role: "user", content: "c" },
   ];
   const current = [{ role: "user", content: "summary" }];
-  assert.equal(detectReset(last, current), true);
+  assert.equal(detectReset(markMessages(last), current), true);
 });
 
 test("detects reset when the tracked prefix no longer matches", () => {
@@ -24,7 +24,7 @@ test("detects reset when the tracked prefix no longer matches", () => {
     { role: "assistant", content: "b" },
     { role: "user", content: "c" },
   ];
-  assert.equal(detectReset(last, current), true);
+  assert.equal(detectReset(markMessages(last), current), true);
 });
 
 test("does not flag a normal append-only turn as a reset", () => {
@@ -34,7 +34,7 @@ test("does not flag a normal append-only turn as a reset", () => {
     { role: "assistant", content: "b" },
     { role: "user", content: "c" },
   ];
-  assert.equal(detectReset(last, current), false);
+  assert.equal(detectReset(markMessages(last), current), false);
 });
 
 test("does not flag a moved cache_control breakpoint as a reset", () => {
@@ -58,7 +58,7 @@ test("does not flag a moved cache_control breakpoint as a reset", () => {
     },
     { role: "user", content: "c" },
   ];
-  assert.equal(detectReset(last, current), false);
+  assert.equal(detectReset(markMessages(last), current), false);
 });
 
 test("still flags a real content change even when cache_control also differs", () => {
@@ -74,5 +74,5 @@ test("still flags a real content change even when cache_control also differs", (
     { role: "assistant", content: "b" },
     { role: "user", content: "c" },
   ];
-  assert.equal(detectReset(last, current), true);
+  assert.equal(detectReset(markMessages(last), current), true);
 });

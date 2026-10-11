@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { decide, envNumber, DEFAULT_LIMITS, type PolicyLimits } from "../src/policy.js";
 import { DEFAULT_PRICING } from "../src/pricing.js";
+import { markMessages } from "../src/reset.js";
 import type { ConversationState, ClassifyResult, Tier } from "../src/types.js";
 
 const thresholdsFixture = fileURLToPath(
@@ -99,7 +100,7 @@ function state(overrides: Partial<ConversationState> = {}): ConversationState {
     lastPrefixTokens: 20_000,
     lastNewTokens: 1_000,
     lastOutputTokens: 500,
-    lastMessages: [{ role: "user", content: "a" }, { role: "assistant", content: "b" }],
+    lastMark: markMessages([{ role: "user", content: "a" }, { role: "assistant", content: "b" }]),
     lastRequestedTier: "sonnet",
     ...overrides,
   };
@@ -170,7 +171,7 @@ test("on reset, adopts the argmax choice immediately with no margin or break-eve
     confidence: 0.34,
     probabilities: { haiku: 0.34, sonnet: 0.33, opus: 0.17, fable: 0.16 },
   };
-  const resetState = state({ lastMessages: [] });
+  const resetState = state({ lastMark: markMessages([]) });
   const decision = decide(classification, resetState, currentMessages, DEFAULT_PRICING, {
     ...DEFAULT_LIMITS,
     marginThreshold: 0,
@@ -185,7 +186,7 @@ test("on reset, adopts the argmax choice immediately, upgrade direction", () => 
     confidence: 0.4,
     probabilities: { haiku: 0.1, sonnet: 0.3, opus: 0.4, fable: 0.2 },
   };
-  const resetState = state({ lastMessages: [] });
+  const resetState = state({ lastMark: markMessages([]) });
   const decision = decide(classification, resetState, currentMessages, DEFAULT_PRICING, {
     ...DEFAULT_LIMITS,
     marginThreshold: 0,
@@ -200,7 +201,7 @@ test("on reset, holds when the argmax choice equals the current tier", () => {
     confidence: 0.4,
     probabilities: { haiku: 0.2, sonnet: 0.4, opus: 0.3, fable: 0.1 },
   };
-  const resetState = state({ lastMessages: [] });
+  const resetState = state({ lastMark: markMessages([]) });
   const decision = decide(classification, resetState, currentMessages, DEFAULT_PRICING);
   assert.deepEqual(decision, { kind: "held" });
 });
@@ -241,7 +242,7 @@ const LIMITS = {
 };
 
 test("a reset holds when the classifier is not confident enough to spend on a switch", () => {
-  const resetState = state({ currentTier: "sonnet", lastMessages: [] });
+  const resetState = state({ currentTier: "sonnet", lastMark: markMessages([]) });
   const classification: ClassifyResult = {
     choice: "fable",
     confidence: 0.34,
@@ -252,7 +253,7 @@ test("a reset holds when the classifier is not confident enough to spend on a sw
 });
 
 test("ROUTER_MAX_TIER caps a reset-window upgrade at the ceiling", () => {
-  const resetState = state({ currentTier: "sonnet", lastMessages: [] });
+  const resetState = state({ currentTier: "sonnet", lastMark: markMessages([]) });
   const classification: ClassifyResult = {
     choice: "fable",
     confidence: 0.9,
@@ -267,7 +268,7 @@ test("ROUTER_MAX_TIER caps a reset-window upgrade at the ceiling", () => {
 });
 
 test("ROUTER_MAX_TIER keeps fable out of the non-reset upgrade candidates", () => {
-  const resetState = state({ currentTier: "sonnet", lastMessages: [{ role: "user", content: "go" }] });
+  const resetState = state({ currentTier: "sonnet", lastMark: markMessages([{ role: "user", content: "go" }]) });
   const classification: ClassifyResult = {
     choice: "fable",
     confidence: 0.9,

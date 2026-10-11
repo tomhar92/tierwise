@@ -1,4 +1,5 @@
 import type { JsonValue } from "@typesafe-ai/sdk";
+import { isRouterNote } from "./upgradeNote.js";
 
 /** Per-string cap. Two thousand characters is far more than the
  * classifier needs to judge difficulty, and far less than a pasted file. */
@@ -52,7 +53,21 @@ export function isSideRequest(body: { tools?: unknown }): boolean {
   return !Array.isArray(body.tools) || body.tools.length === 0;
 }
 
+// Claude Code stores the router's own upgrade note as part of the
+// assistant's reply and resends it every turn. It says nothing about the
+// task, and feeding it back would let the router's earlier suggestion
+// influence its next classification.
+function withoutRouterNotes(message: unknown): unknown {
+  const content = (message as { content?: unknown } | null)?.content;
+  if (!Array.isArray(content)) return message;
+  const kept = content.filter(
+    (block) => !((block as { type?: unknown })?.type === "text" && isRouterNote((block as { text?: unknown }).text))
+  );
+  return kept.length === content.length ? message : { ...(message as object), content: kept };
+}
+
 export function sanitizeForClassifier(messages: unknown[]): JsonValue[] {
+  messages = messages.map(withoutRouterNotes);
   let budget = MAX_TOTAL_CHARS;
 
   const take = (value: unknown): JsonValue => {

@@ -1,12 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createConversationStore, updateState } from "./conversationKey.js";
 import type { ConversationStore } from "./conversationKey.js";
-import { decide, DEFAULT_LIMITS } from "./policy.js";
+import { decide, DEFAULT_LIMITS, type PolicyLimits } from "./policy.js";
 import { computeMargins } from "./margins.js";
 import { classifyTurn, type ClassifyInput, type ClassifyOptions } from "./classify.js";
 import { DEFAULT_PRICING, tierForModel, computeCostUsd } from "./pricing.js";
 import { adaptBetaHeader, adaptBodyForTier } from "./adaptRequest.js";
-import { appendLedgerLine } from "./ledger.js";
+import { appendLedgerLine, type LedgerLine } from "./ledger.js";
 import {
   extractLatestUserText,
   isSideRequest,
@@ -27,6 +27,9 @@ export interface ServerOptions {
   /** Hard cap on a buffered request body. Default 64 MiB, or
    * ROUTER_MAX_BODY_BYTES. */
   maxBodyBytes?: number;
+  /** Policy limits for this server. Defaults to the environment-derived
+   * DEFAULT_LIMITS read at startup. */
+  limits?: PolicyLimits;
 }
 
 export class BodyTooLargeError extends Error {
@@ -50,6 +53,69 @@ const HOP_BY_HOP_RESPONSE_HEADERS = [
   "transfer-encoding",
   "connection",
 ];
+
+// Per-hop request headers. Node's fetch rejects some of them outright
+// (`invalid keep-alive header`, `invalid transfer-encoding header`), which
+// turned an ordinary chunked upload or a client that sends Keep-Alive into
+// a 502. They describe the client-to-proxy connection, not the request, so
+// the upstream connection must not inherit them. Headers the client names
+// in `Connection` are per-hop too (RFC 9110 section 7.6.1).
+const HOP_BY_HOP_REQUEST_HEADERS = [
+  "connection",
+  "keep-alive",
+  "transfer-encoding",
+  "te",
+  "trailer",
+  "upgrade",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "proxy-connection",
+];
+
+function upstreamRequestHeaders(req: IncomingMessage): Headers {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (typeof value === "string") headers.set(key, value);
+    else if (Array.isArray(value)) headers.set(key, value.join(", "));
+  }
+  const named = (headers.get("connection") ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+  for (const name of [...HOP_BY_HOP_REQUEST_HEADERS, ...named, "host", "content-length"]) {
+    headers.delete(name);
+  }
+  return headers;
+}
+
+// res.write() returns false once its buffer is full; ignoring that let a
+// slow client make the proxy hold the whole response in memory. A client
+// that goes away never drains, so "close" also releases the wait.
+function writeWithBackpressure(res: ServerResponse, chunk: string | Uint8Array): Promise<void> {
+  if (res.write(chunk)) return Promise.resolve();
+  return new Promise((resolve) => {
+    const release = () => {
+      res.off("drain", release);
+      res.off("close", release);
+      resolve();
+    };
+    res.once("drain", release);
+    res.once("close", release);
+  });
+}
+
+// The ledger is bookkeeping; the turn it describes has already been
+// delivered by the time it is written. A full disk or a bad path must not
+// surface as a router error on a finished response.
+function recordLedger(path: string, line: LedgerLine): void {
+  try {
+    appendLedgerLine(path, line);
+  } catch (err) {
+    console.warn(
+      `typesafe-claude-router: could not write ledger ${path}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}
 
 function requestPath(url: string | undefined): string {
   // Matching `req.url === "/v1/messages"` failed on any query string, so
@@ -115,13 +181,7 @@ async function forwardAndStream(
   rewrittenToTier?: Tier,
   notice?: string
 ): Promise<{ response: Response; usage: UsageTotals }> {
-  const upstreamHeaders = new Headers();
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (typeof value === "string") upstreamHeaders.set(key, value);
-    else if (Array.isArray(value)) upstreamHeaders.set(key, value.join(", "));
-  }
-  upstreamHeaders.delete("host");
-  upstreamHeaders.delete("content-length");
+  const upstreamHeaders = upstreamRequestHeaders(req);
   const betas = upstreamHeaders.get("anthropic-beta");
   if (rewrittenToTier && betas) {
     const adapted = adaptBetaHeader(betas, rewrittenToTier);
@@ -152,20 +212,20 @@ async function forwardAndStream(
       if (done) break;
       const text = decoder.decode(value, { stream: true });
       accumulator.push(text);
-      res.write(injector.push(text));
+      await writeWithBackpressure(res, injector.push(text));
     }
-    res.write(injector.flush());
+    await writeWithBackpressure(res, injector.flush());
   } else if (addNotice && contentType.includes("json")) {
     const text = await response.text();
     accumulator.push(text);
-    res.write(injectNoteIntoJson(text, notice));
+    await writeWithBackpressure(res, injectNoteIntoJson(text, notice));
   } else if (response.body) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      res.write(value);
+      await writeWithBackpressure(res, value);
       accumulator.push(decoder.decode(value, { stream: true }));
     }
   }
@@ -190,13 +250,7 @@ export async function passThroughRequest(
   const bodyBuffer = hasBody ? await readBody(req, maxBodyBytes) : undefined;
   const body = bodyBuffer ? new Uint8Array(bodyBuffer) : undefined;
 
-  const upstreamHeaders = new Headers();
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (typeof value === "string") upstreamHeaders.set(key, value);
-    else if (Array.isArray(value)) upstreamHeaders.set(key, value.join(", "));
-  }
-  upstreamHeaders.delete("host");
-  upstreamHeaders.delete("content-length");
+  const upstreamHeaders = upstreamRequestHeaders(req);
 
   const response = await fetch(`${upstream}${req.url ?? "/"}`, {
     method,
@@ -214,7 +268,7 @@ export async function passThroughRequest(
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      res.write(value);
+      await writeWithBackpressure(res, value);
     }
   }
   res.end();
@@ -233,9 +287,10 @@ export async function handleMessages(
   const pricing = options.pricing ?? DEFAULT_PRICING;
   const classify = options.classify ?? classifyTurn;
   const maxBodyBytes = resolveMaxBodyBytes(options);
+  const limits = options.limits ?? DEFAULT_LIMITS;
 
   const bodyBuf = await readBody(req, maxBodyBytes);
-  let body: any;
+  let body: Record<string, unknown>;
   try {
     body = JSON.parse(bodyBuf.toString("utf8"));
   } catch {
@@ -276,7 +331,7 @@ export async function handleMessages(
               usage.cacheCreationTokens,
               usage.cacheReadTokens
             );
-      appendLedgerLine(ledgerPath, {
+      recordLedger(ledgerPath, {
         v: 2,
         ts: new Date().toISOString(),
         conversationKey: "side-request",
@@ -309,14 +364,14 @@ export async function handleMessages(
   // (billed) classifier call entirely, and still record the turn so the
   // report can surface how often this happens. A run full of
   // `unknown-model` lines means the alias table needs a new entry.
-  const messages: any[] = Array.isArray(body.messages) ? body.messages : [];
+  const messages: unknown[] = Array.isArray(body.messages) ? body.messages : [];
 
   if (requestedTier === null) {
     const state = conversations.getOrInitState(req.socket, "sonnet", messages);
     const { response, usage } = await forwardAndStream(req, res, body, upstream, signal);
     if (response.ok) {
       // The turn still happened and still grew the conversation, even
-      // though we couldn't price or route it - lastMessages must move
+      // though we couldn't price or route it - lastMark must move
       // forward so the *next* turn's detectReset() compares against this
       // turn's messages instead of the socket's initial `[]`. Leaving it
       // stale made any turn right after an unknown-model turn look like a
@@ -335,7 +390,7 @@ export async function handleMessages(
         messages
       );
 
-      appendLedgerLine(ledgerPath, {
+      recordLedger(ledgerPath, {
         v: 2,
         ts: new Date().toISOString(),
         conversationKey: state.connectionId,
@@ -401,6 +456,10 @@ export async function handleMessages(
 
   const latestUserMessage = extractLatestUserText(messages);
 
+  // The turn the user changes the model is the user's call: no classifier
+  // opinion (and no billed call) on it, and the choice is pinned below.
+  const manualSwitch = userChangedModel;
+
   // A tool-result continuation is the next step of a turn whose tier was
   // already settled; asking the classifier again costs a call per step and
   // could only trigger a mid-loop switch. Hold, and log it as its own
@@ -409,7 +468,7 @@ export async function handleMessages(
 
   // Passing the request signal means a client disconnect cancels the
   // classification too, instead of leaving a billed request in flight.
-  const classification = skipped
+  const classification = skipped || manualSwitch
     ? null
     : await classify(
         {
@@ -418,7 +477,7 @@ export async function handleMessages(
         },
         { signal }
       );
-  if (!classification && !skipped) {
+  if (!classification && !skipped && !manualSwitch) {
     console.warn(
       "typesafe-claude-router: classifier unavailable this turn (TypeSafe error or timeout) - holding current tier"
     );
@@ -426,13 +485,13 @@ export async function handleMessages(
 
   const marginInfo = classification
     ? computeMargins(classification.probabilities, state.currentTier, {
-        min: DEFAULT_LIMITS.minTier,
-        max: DEFAULT_LIMITS.maxTier,
+        min: limits.minTier,
+        max: limits.maxTier,
       })
     : null;
 
   const decision = classification
-    ? decide(classification, state, messages, pricing)
+    ? decide(classification, state, messages, pricing, limits)
     : ({ kind: "held" } as const);
 
   const isSwitch =
@@ -488,6 +547,7 @@ export async function handleMessages(
   // had would poison both the sticky-tier state and the cost report.
   if (upstreamResponse.ok) {
     state.lastRequestedTier = requestedTier;
+    if (manualSwitch) state.pinnedByUser = true;
     updateState(
       state,
       actualTier,
@@ -533,7 +593,7 @@ export async function handleMessages(
       counterfactualCacheReadTokens
     );
 
-    appendLedgerLine(ledgerPath, {
+    recordLedger(ledgerPath, {
       v: 2,
       ts: new Date().toISOString(),
       conversationKey: state.connectionId,
@@ -541,7 +601,13 @@ export async function handleMessages(
       confidence: classification?.confidence ?? null,
       downgradeMargin: marginInfo?.downgradeMargin ?? 0,
       upgradeMargin: marginInfo?.upgradeMargin ?? 0,
-      decision: classification ? decision.kind : skipped ? "skipped-tool-result" : "classifier-unavailable",
+      decision: classification
+        ? decision.kind
+        : manualSwitch
+          ? "manual-switch"
+          : skipped
+            ? "skipped-tool-result"
+            : "classifier-unavailable",
       resetDetected:
         decision.kind === "downgraded-on-reset" || decision.kind === "upgraded-on-reset",
       suggestedUpgradeTo: decision.kind === "upgrade-suggested" ? decision.to : null,

@@ -56,7 +56,7 @@ export function decide(
   pricing: PricingConfig,
   limits: PolicyLimits = DEFAULT_LIMITS
 ): Decision {
-  const isReset = detectReset(state.lastMessages, currentMessages);
+  const isReset = detectReset(state.lastMark, currentMessages);
 
   if (isReset) {
     // A reset is a free window - the cache is being rebuilt anyway - but
@@ -89,6 +89,9 @@ export function decide(
     downgradeEligible && (!upgradeEligible || downgradeMargin >= upgradeMargin);
 
   if (preferDowngrade) {
+    // The user chose this model on purpose; a classifier opinion is not
+    // enough to take it away.
+    if (state.pinnedByUser) return { kind: "held" };
     const turns = breakEvenTurns(
       state.lastPrefixTokens,
       state.lastNewTokens,

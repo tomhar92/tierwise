@@ -20,6 +20,11 @@ export interface ClassifyResult {
   probabilities: Record<Tier, number>;
 }
 
+export interface MessageMark {
+  count: number;
+  digest: string;
+}
+
 export interface ConversationState {
   /** Stable per-socket id for this conversation, used as the ledger's
    * `conversationKey` so turns from concurrent sessions can be told apart. */
@@ -29,10 +34,20 @@ export interface ConversationState {
   lastPrefixTokens: number;
   lastNewTokens: number;
   lastOutputTokens: number;
-  lastMessages: unknown[];
+  /** Fingerprint of the message history after the last successful turn: how
+   * many messages there were and a digest of them. Enough to tell whether
+   * the next request continues this conversation, without keeping the
+   * (potentially huge) messages themselves. */
+  lastMark: MessageMark;
   /** The tier Claude Code itself requested on the most recent turn, used to
    * detect a manual `/model` change so the router doesn't fight it. */
   lastRequestedTier: Tier;
+  /** Set once the user has changed the model themselves. The router never
+   * automatically moves a pinned conversation to a cheaper tier; it can
+   * still suggest an upgrade. Ends with the conversation (`/clear`, `/compact`,
+   * or a rewind/edit, which the store treats as a new one) - a later
+   * `/model` re-pins at the new choice. */
+  pinnedByUser?: boolean;
 }
 
 export type Decision =

@@ -178,14 +178,19 @@ numbers from the report.
 
 ## Known limitations (v1)
 
-- Conversation identity is a hash of the conversation's first message,
-  not the TCP connection (Anthropic's API sends no session ID, and Claude
-  Code opens new connections mid-conversation and shares one between the
-  main thread and subagents). `/clear`, `/compact` and each subagent start
-  with a different first message, so they count as new conversations. Two
-  sessions that open with an identical first message would share routing
-  state. State is held in memory (the 500 most recent conversations) and is
-  lost on restart.
+- Conversation identity is the conversation's first message, not the TCP
+  connection (Anthropic's API sends no session ID, and Claude Code opens
+  new connections mid-conversation and shares one between the main thread
+  and subagents). `/clear`, `/compact` and each subagent start with a
+  different first message, so they count as new conversations. Sessions
+  that open with an identical first message are told apart by which
+  recorded history the request continues, so they stop sharing state as
+  soon as they diverge (two that start simultaneously and are still
+  identical share state until they do). A rewind or edit of an earlier
+  message does not continue the recorded history, so it starts fresh
+  state; the cache is rebuilt then anyway. Per conversation only a message
+  count and a digest are kept, not the messages. State is held in memory
+  (the 500 most recently used conversations) and is lost on restart.
 - Claude Code builds each request for the model it is using, so a request
   moved to Haiku is reshaped to match what Claude Code itself sends for
   Haiku (`src/adaptRequest.ts`: output cap, thinking mode, effort,
@@ -197,6 +202,13 @@ numbers from the report.
   call a tool; the next turn suggests again if it still applies). Claude
   Code keeps it in the conversation history like any other assistant text.
   The request itself is never modified for it, so it does not touch the cache.
+  The note is left out of what is sent to the classifier.
+- When you change the model yourself (`/model ...`), that turn is honored
+  as-is and not classified (ledger decision `manual-switch`), and the
+  conversation is pinned to your choice: the router will not automatically
+  move it to a cheaper tier afterwards, though it may still suggest an
+  upgrade. A new conversation (`/clear`, `/compact`, a rewind) or another
+  `/model` starts fresh.
 - If TypeSafe errors or times out on a turn, the router holds the current
   tier and logs `decision: "classifier-unavailable"` (distinct from a
   genuine policy-driven `held`) so a broken API key doesn't quietly look

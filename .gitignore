@@ -3,3 +3,4 @@ dist/
 *.jsonl
 .env
 .DS_Store
+.claude/worktrees/
