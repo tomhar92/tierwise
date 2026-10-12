@@ -94,3 +94,14 @@ test("deltaLabel says no change for a zero or rounding-dust delta, not cost more
   assert.equal(deltaLabel(-0.0123), "saved");
   assert.equal(deltaLabel(0.0123), "cost more");
 });
+
+test("report args: --since and --today scope the window, bad values are errors", async () => {
+  const { parseReportArgs } = await import("../bin/report.js");
+  const now = new Date("2026-10-12T12:00:00");
+  assert.equal(parseReportArgs(["--since", "1d"], {}, now).since?.getTime(), now.getTime() - 86_400_000);
+  assert.equal(parseReportArgs(["--today"], {}, now).since?.getDate(), 12);
+  assert.equal(parseReportArgs(["x.jsonl", "--since", "2w"], {}, now).path, "x.jsonl");
+  assert.match(parseReportArgs(["--since", "nonsense"], {}, now).error ?? "", /--since/);
+  assert.match(parseReportArgs(["--bogus"], {}, now).error ?? "", /unknown option/);
+  assert.equal(parseReportArgs(["--help"], {}, now).path, null);
+});

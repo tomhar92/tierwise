@@ -1578,6 +1578,40 @@ test("a ledger that cannot be written is a warning, not a router error", async (
   fake.close();
 });
 
+test("onTurn receives every recorded turn, even when the ledger cannot be written", async () => {
+  const fake = await withFakeUpstream(() => ({
+    status: 200,
+    usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    text: "ok",
+  }));
+  const warnLog = mock.method(console, "warn", () => {});
+  const seen: string[] = [];
+  const router = createProxyServer({
+    upstream: fake.url,
+    ledgerPath: join(mkdtempSync(join(tmpdir(), "ledger-")), "missing-dir", "ledger.jsonl"),
+    onTurn: (line) => seen.push(line.decision),
+    classify: async () => ({
+      choice: "sonnet",
+      confidence: 0.8,
+      probabilities: { haiku: 0.05, sonnet: 0.8, opus: 0.1, fable: 0.05 },
+    }),
+  });
+  const port = await listen(router);
+
+  const response = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: DEFAULT_PRICING.modelAlias.sonnet, tools: TOOLS, messages: [{ role: "user", content: "hi" }] }),
+  });
+  await response.text();
+  mock.restoreAll();
+  void warnLog;
+  assert.deepEqual(seen, ["held"]);
+
+  router.close();
+  fake.close();
+});
+
 test("honors policy limits passed in the server options instead of only the environment defaults", async () => {
   const fake = await withFakeUpstream(() => ({
     status: 200,

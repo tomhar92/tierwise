@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { validateStartupConfig, describeBackend } from "../src/server.js";
-import { mkdtempSync, writeFileSync, chmodSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { run, launchClaude, launchEnv, launchLimits } from "../bin/router.js";
+import { run, launchClaude, launchEnv, launchLimits, hasOwnStatusLine, statusLineSettings } from "../bin/router.js";
 import { DEFAULT_LIMITS } from "../src/policy.js";
 
 test("refuses to start silently without a TypeSafe key", () => {
@@ -100,6 +100,7 @@ test("bare launch runs claude with the user's arguments behind the proxy", async
     ...process.env,
     PATH: `${dir}${delimiter}${process.env.PATH}`,
     TYPESAFE_API_KEY: "k",
+    TIERWISE_STATUSLINE: "0",
   });
   assert.equal(code, 0);
   const seen = JSON.parse(readFileSync(out, "utf8"));
@@ -109,4 +110,87 @@ test("bare launch runs claude with the user's arguments behind the proxy", async
 
 test("bare launch refuses to start without a key", async () => {
   assert.equal(await launchClaude([], { PATH: process.env.PATH }), 1);
+});
+
+test("the status line settings run this script's status command, quoting awkward paths", () => {
+  const settings = JSON.parse(statusLineSettings("/a b/it's/router.js", "/usr/bin/node"));
+  assert.equal(settings.statusLine.type, "command");
+  assert.equal(settings.statusLine.command, "'/usr/bin/node' '/a b/it'\\''s/router.js' status");
+});
+
+test("an existing statusLine in the user's settings is detected, anywhere claude would read it", () => {
+  const home = mkdtempSync(join(tmpdir(), "tierwise-home-"));
+  const project = mkdtempSync(join(tmpdir(), "tierwise-proj-"));
+  assert.equal(hasOwnStatusLine(home, project), false);
+  mkdirSync(join(home, ".claude"));
+  writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ theme: "dark" }));
+  assert.equal(hasOwnStatusLine(home, project), false);
+  writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ statusLine: { type: "command", command: "x" } }));
+  assert.equal(hasOwnStatusLine(home, project), true);
+  writeFileSync(join(home, ".claude", "settings.json"), "{ not json");
+  assert.equal(hasOwnStatusLine(home, project), false);
+});
+
+test("bare launch hands claude the status line settings and the status file, then cleans up", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "fake-claude-"));
+  const out = join(dir, "seen.json");
+  const fake = join(dir, "claude");
+  writeFileSync(
+    fake,
+    `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(out)}, JSON.stringify({args: process.argv.slice(2), file: process.env.TIERWISE_STATUS_FILE}));\n`
+  );
+  chmodSync(fake, 0o755);
+  const home = mkdtempSync(join(tmpdir(), "tierwise-home-"));
+  const code = await launchClaude(["--model", "haiku"], {
+    ...process.env,
+    HOME: home,
+    PATH: `${dir}${delimiter}${process.env.PATH}`,
+    TYPESAFE_API_KEY: "k",
+  });
+  assert.equal(code, 0);
+  const seen = JSON.parse(readFileSync(out, "utf8"));
+  assert.equal(seen.args[0], "--settings");
+  assert.equal(JSON.parse(seen.args[1]).statusLine.type, "command");
+  assert.deepEqual(seen.args.slice(2), ["--model", "haiku"]);
+  assert.match(seen.file, /tierwise-\d+\.json$/);
+  assert.ok(!existsSync(seen.file), "status file removed on exit");
+});
+
+test("TIERWISE_STATUSLINE=0 launches claude without touching its settings", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "fake-claude-"));
+  const out = join(dir, "seen.json");
+  const fake = join(dir, "claude");
+  writeFileSync(
+    fake,
+    `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(out)}, JSON.stringify(process.argv.slice(2)));\n`
+  );
+  chmodSync(fake, 0o755);
+  await launchClaude(["--model", "haiku"], {
+    ...process.env,
+    PATH: `${dir}${delimiter}${process.env.PATH}`,
+    TYPESAFE_API_KEY: "k",
+    TIERWISE_STATUSLINE: "0",
+  });
+  assert.deepEqual(JSON.parse(readFileSync(out, "utf8")), ["--model", "haiku"]);
+});
+
+test("a user who already has a status line keeps it: no --settings is passed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "fake-claude-"));
+  const out = join(dir, "seen.json");
+  const fake = join(dir, "claude");
+  writeFileSync(
+    fake,
+    `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(out)}, JSON.stringify(process.argv.slice(2)));\n`
+  );
+  chmodSync(fake, 0o755);
+  const home = mkdtempSync(join(tmpdir(), "tierwise-home-"));
+  mkdirSync(join(home, ".claude"));
+  writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ statusLine: { type: "command", command: "mine" } }));
+  await launchClaude(["-p"], {
+    ...process.env,
+    HOME: home,
+    PATH: `${dir}${delimiter}${process.env.PATH}`,
+    TYPESAFE_API_KEY: "k",
+  });
+  assert.deepEqual(JSON.parse(readFileSync(out, "utf8")), ["-p"]);
 });

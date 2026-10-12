@@ -22,6 +22,9 @@ import type { PricingConfig, Tier, ClassifyResult } from "./types.js";
 export interface ServerOptions {
   upstream?: string;
   ledgerPath?: string;
+  /** Called with every turn's ledger line after it is recorded, whether or
+   * not the ledger write succeeded. The status line is fed from here. */
+  onTurn?: (line: LedgerLine) => void;
   pricing?: PricingConfig;
   classify?: (input: ClassifyInput, options?: ClassifyOptions) => Promise<ClassifyResult | null>;
   /** Hard cap on a buffered request body. Default 64 MiB, or
@@ -284,6 +287,10 @@ export async function handleMessages(
   const upstream = options.upstream ?? "https://api.anthropic.com";
   const ledgerPath =
     options.ledgerPath ?? process.env.ROUTER_LEDGER_PATH ?? "./router-ledger.jsonl";
+  const record = (line: LedgerLine): void => {
+    recordLedger(ledgerPath, line);
+    options.onTurn?.(line);
+  };
   const pricing = options.pricing ?? DEFAULT_PRICING;
   const classify = options.classify ?? classifyTurn;
   const maxBodyBytes = resolveMaxBodyBytes(options);
@@ -331,7 +338,7 @@ export async function handleMessages(
               usage.cacheCreationTokens,
               usage.cacheReadTokens
             );
-      recordLedger(ledgerPath, {
+      record({
         v: 2,
         ts: new Date().toISOString(),
         conversationKey: "side-request",
@@ -390,7 +397,7 @@ export async function handleMessages(
         messages
       );
 
-      recordLedger(ledgerPath, {
+      record({
         v: 2,
         ts: new Date().toISOString(),
         conversationKey: state.connectionId,
@@ -593,7 +600,7 @@ export async function handleMessages(
       counterfactualCacheReadTokens
     );
 
-    recordLedger(ledgerPath, {
+    record({
       v: 2,
       ts: new Date().toISOString(),
       conversationKey: state.connectionId,

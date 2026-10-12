@@ -1,4 +1,5 @@
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { basename, dirname, extname, join } from "node:path";
 import type { Tier } from "./types.js";
 
 export { computeCostUsd } from "./pricing.js";
@@ -67,4 +68,46 @@ export function readLedger(path: string): LedgerLine[] {
       const parsed = JSON.parse(l) as Partial<LedgerLine>;
       return { v: 2, ...parsed } as LedgerLine;
     });
+}
+
+const DURATION_MS: Record<string, number> = { h: 3_600_000, d: 86_400_000, w: 604_800_000 };
+
+/** "12h", "1d", "2w", "today" or an ISO date -> the cutoff Date, or null
+ * when the text is none of those. */
+export function parseSince(spec: string, now: Date = new Date()): Date | null {
+  const text = spec.trim().toLowerCase();
+  if (text === "today") return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const duration = /^(\d+)([hdw])$/.exec(text);
+  if (duration) return new Date(now.getTime() - Number(duration[1]) * DURATION_MS[duration[2]]);
+  const date = new Date(spec.trim());
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function filterSince(lines: LedgerLine[], since: Date): LedgerLine[] {
+  return lines.filter((line) => new Date(line.ts).getTime() >= since.getTime());
+}
+
+function stamp(now: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+    `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  );
+}
+
+/** Moves the ledger aside as `<name>-<timestamp>.jsonl` next to it. The
+ * next turn starts a fresh file, because writes open the path each time.
+ * Returns the archive path, or null if there was no ledger. */
+export function archiveLedger(path: string, now: Date = new Date()): string | null {
+  if (!existsSync(path)) return null;
+  const extension = extname(path);
+  const archive = join(dirname(path), `${basename(path, extension)}-${stamp(now)}${extension}`);
+  renameSync(path, archive);
+  return archive;
+}
+
+export function deleteLedger(path: string): boolean {
+  if (!existsSync(path)) return false;
+  rmSync(path);
+  return true;
 }
