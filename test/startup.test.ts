@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { validateStartupConfig, describeBackend } from "../src/server.js";
-import { run } from "../bin/router.js";
+import { mkdtempSync, writeFileSync, chmodSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import { run, launchClaude, launchEnv, launchLimits } from "../bin/router.js";
+import { DEFAULT_LIMITS } from "../src/policy.js";
 
 test("refuses to start silently without a TypeSafe key", () => {
   const problems = validateStartupConfig({});
@@ -66,4 +70,43 @@ test("describeBackend names the endpoint and model in use", () => {
     "http://localhost:8000 (model openjev-4b)"
   );
   assert.equal(describeBackend({}), "https://api.typesafe.ai (model jev-latest)");
+});
+
+test("the launcher caps spend at opus unless the operator chose a ceiling", () => {
+  assert.equal(launchEnv({}).ROUTER_MAX_TIER, "opus");
+  assert.equal(launchLimits({}).maxTier, "opus");
+  assert.equal(launchEnv({ ROUTER_MAX_TIER: "fable" }).ROUTER_MAX_TIER, "fable");
+  assert.equal(launchLimits({ ROUTER_MAX_TIER: "fable" }).maxTier, DEFAULT_LIMITS.maxTier);
+  // The launcher's default is not a warning: opus is what the warning asks for.
+  assert.deepEqual(validateStartupConfig({ ...launchEnv({}), TYPESAFE_API_KEY: "k" }), []);
+});
+
+test("the missing-key message says where to get one and how to set it", () => {
+  const [problem] = validateStartupConfig({});
+  assert.match(problem, /typesafe\.ai/);
+  assert.match(problem, /export TYPESAFE_API_KEY=/);
+});
+
+test("bare launch runs claude with the user's arguments behind the proxy", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "fake-claude-"));
+  const out = join(dir, "seen.json");
+  const fake = join(dir, "claude");
+  writeFileSync(
+    fake,
+    `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(out)}, JSON.stringify({args: process.argv.slice(2), url: process.env.ANTHROPIC_BASE_URL}));\n`
+  );
+  chmodSync(fake, 0o755);
+  const code = await launchClaude(["--model", "haiku"], {
+    ...process.env,
+    PATH: `${dir}${delimiter}${process.env.PATH}`,
+    TYPESAFE_API_KEY: "k",
+  });
+  assert.equal(code, 0);
+  const seen = JSON.parse(readFileSync(out, "utf8"));
+  assert.deepEqual(seen.args, ["--model", "haiku"]);
+  assert.match(seen.url, /^http:\/\/127\.0\.0\.1:\d+$/);
+});
+
+test("bare launch refuses to start without a key", async () => {
+  assert.equal(await launchClaude([], { PATH: process.env.PATH }), 1);
 });

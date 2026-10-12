@@ -51,7 +51,7 @@ export function deltaLabel(deltaUsd: number): string {
   return rounded < 0 ? "saved" : "cost more";
 }
 
-const USAGE = "Usage: typesafe-claude-router-report [path-to-ledger.jsonl]";
+const USAGE = "Usage: tierwise-report [path-to-ledger.jsonl]";
 
 /** `--help` is the only way to get the usage line now: with a default
  * path, the bare invocation is valid. */

@@ -1,22 +1,28 @@
 {
-  "name": "typesafe-claude-router",
+  "name": "tierwise",
   "version": "0.1.0",
-  "description": "Cache-aware, TypeSafe-driven model tier router for Claude Code",
+  "description": "Cache-aware model tier router for Claude Code",
   "type": "module",
   "license": "MIT",
   "engines": {
     "node": ">=20.0.0"
   },
   "bin": {
-    "typesafe-claude-router": "./dist/bin/router.js",
-    "typesafe-claude-router-report": "./dist/bin/report.js"
+    "tierwise": "dist/bin/router.js",
+    "tierwise-report": "dist/bin/report.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -p .",
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "npm run typecheck && node --import tsx --test $(find test -name '*.test.ts')",
     "start": "tsx src/server.ts",
-    "report": "tsx bin/report.ts"
+    "report": "tsx bin/report.ts",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@typesafe-ai/sdk": "^0.6.0"
