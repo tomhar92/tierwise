@@ -1,8 +1,9 @@
-# typesafe-claude-router
+# tierwise
 
 A local proxy that routes Claude Code turns across model tiers
-(`haiku` / `sonnet` / `opus` / `fable`) using TypeSafe's Jev `Choice`
-primitive — but only when the math says it's actually worth it.
+(`haiku` / `sonnet` / `opus` / `fable`) — but only when the math says it's
+actually worth it. The classifier that judges each turn is a pluggable
+backend; today that is TypeSafe's Jev `Choice` primitive.
 
 ## Why this exists, and the catch
 
@@ -55,7 +56,7 @@ implements the same wire format works without code changes:
 ```bash
 TYPESAFE_BASE_URL=http://localhost:8000 \
 TYPESAFE_DEFAULT_MODEL=<model name the server expects> \
-typesafe-claude-router run -- claude
+tierwise
 ```
 
 `TYPESAFE_API_KEY` is only required for TypeSafe's hosted API; the router
@@ -85,25 +86,31 @@ Requires Node 20+ (the TypeSafe SDK requires it; the proxy itself uses the globa
 
 ```bash
 export TYPESAFE_API_KEY=...      # from typesafe.ai
-npx typesafe-claude-router run -- claude
+npx tierwise       # runs claude through the router
 ```
 
-`run` starts the proxy on an ephemeral loopback port, launches the command after `--` with `ANTHROPIC_BASE_URL` pointed at it,
-and shuts the proxy down when the command exits. Your normal Anthropic
-auth is passed through untouched. The router refuses to start without
-`TYPESAFE_API_KEY` rather than quietly logging `classifier-unavailable`
-on every turn.
+That is the whole setup. Arguments go to claude, so
+`npx tierwise --model haiku` works. The launcher starts the
+proxy on an ephemeral loopback port, runs `claude` with `ANTHROPIC_BASE_URL`
+pointed at it, and shuts the proxy down when claude exits. Your normal
+Anthropic auth is passed through untouched. The router refuses to start
+without `TYPESAFE_API_KEY` rather than quietly logging
+`classifier-unavailable` on every turn.
 
-The package is not published to npm yet. From a clone, run `npm install &&
-npm run build && npm link`, which puts the same `typesafe-claude-router`
-command on your PATH.
+The launcher caps autonomous spend at opus unless you set `ROUTER_MAX_TIER`
+yourself (`ROUTER_MAX_TIER=fable` allows fable). To run something other
+than claude, or to keep the plain defaults, use
+`tierwise run -- <command>`.
+
+From a clone instead of npm: `npm install && npm run build && npm link`
+puts the same `tierwise` command on your PATH.
 
 ### Keeping the proxy running
 
 If you want one long-lived proxy for several sessions, use two terminals:
 
 ```bash
-typesafe-claude-router serve     # 127.0.0.1:8787 (PORT/HOST to change)
+tierwise serve     # 127.0.0.1:8787 (PORT/HOST to change)
 ```
 
 ```bash
@@ -120,7 +127,7 @@ The router switches models for real: a switch decision rewrites the
 `./router-ledger.jsonl` fill in during a session, then run:
 
 ```bash
-typesafe-claude-router report            # or: report path/to/ledger.jsonl
+tierwise report            # or: report path/to/ledger.jsonl
 ```
 
 The path defaults to `ROUTER_LEDGER_PATH`, then `./router-ledger.jsonl`.
@@ -139,7 +146,7 @@ a few real sessions, that:
 A cautious first run limits how far the router can move:
 
 ```bash
-ROUTER_MIN_TIER=sonnet ROUTER_MAX_TIER=opus typesafe-claude-router run -- claude
+ROUTER_MIN_TIER=sonnet ROUTER_MAX_TIER=opus tierwise run -- claude
 ```
 
 The router warns at startup if there is no `ROUTER_MAX_TIER`.

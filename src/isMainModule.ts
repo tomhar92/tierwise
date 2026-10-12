@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
  * it loads the ESM entry module, so `import.meta.url` reflects the real
  * path while `process.argv[1]` is still the symlink Node was invoked
  * through; the two never match and the "am I main?" check silently does
- * nothing (e.g. the published `typesafe-claude-router-report` bin would
+ * nothing (e.g. the published `tierwise-report` bin would
  * never run its `main()`).
  */
 export function isMainModule(moduleUrl: string): boolean {

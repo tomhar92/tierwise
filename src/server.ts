@@ -112,7 +112,7 @@ function recordLedger(path: string, line: LedgerLine): void {
     appendLedgerLine(path, line);
   } catch (err) {
     console.warn(
-      `typesafe-claude-router: could not write ledger ${path}: ${err instanceof Error ? err.message : String(err)}`
+      `tierwise: could not write ledger ${path}: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 }
@@ -479,7 +479,7 @@ export async function handleMessages(
       );
   if (!classification && !skipped && !manualSwitch) {
     console.warn(
-      "typesafe-claude-router: classifier unavailable this turn (TypeSafe error or timeout) - holding current tier"
+      "tierwise: classifier unavailable this turn (TypeSafe error or timeout) - holding current tier"
     );
   }
 
@@ -722,7 +722,8 @@ export function validateStartupConfig(env: NodeJS.ProcessEnv): string[] {
   }
   if (keyRequired && !env.TYPESAFE_API_KEY?.trim()) {
     problems.push(
-      "TYPESAFE_API_KEY is not set: every turn would log classifier-unavailable and the router would never route."
+      "TYPESAFE_API_KEY is not set: every turn would log classifier-unavailable and the router would never route. " +
+        "Get a key at https://typesafe.ai, then run: export TYPESAFE_API_KEY=<your key>"
     );
   }
   if (!env.ROUTER_MAX_TIER?.trim()) {
@@ -762,7 +763,7 @@ if (isMainModule(import.meta.url)) {
   // broadly (e.g. inside a container).
   const host = process.env.HOST ?? "127.0.0.1";
   createProxyServer().listen(port, host, () => {
-    console.log(`typesafe-claude-router listening on http://${host}:${port}`);
+    console.log(`tierwise listening on http://${host}:${port}`);
     console.log(`classifier: ${describeBackend(process.env)}`);
   });
 }
