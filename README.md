@@ -133,6 +133,35 @@ tierwise report            # or: report path/to/ledger.jsonl
 The path defaults to `ROUTER_LEDGER_PATH`, then `./router-ledger.jsonl`.
 (From a clone: `npm run report`.)
 
+### Status line
+
+Inside the launcher, Claude Code's status line shows the router at a glance:
+
+```
+tierwise · sonnet · 12 turns · saved $0.31 (14%) · ↑ opus suggested
+```
+
+Tier of the latest turn, turns routed this run, savings against the
+no-routing baseline, and the pending upgrade suggestion if there is one.
+The launcher passes this to claude with `--settings`, so none of your
+settings files are edited, and it steps aside if you already configure a
+`statusLine` (in `~/.claude/settings.json` or the project's `.claude/`).
+`TIERWISE_STATUSLINE=0` turns it off. The numbers come from a tiny file the
+proxy rewrites each turn, not from the ledger, so a large ledger never slows
+the status line.
+
+### Keeping the ledger manageable
+
+```bash
+tierwise report --today          # or --since 12h / 1d / 2w / 2026-10-01
+tierwise reset                   # archive the ledger as ledger-<timestamp>.jsonl and start fresh
+tierwise reset --delete          # delete it instead (asks first; --yes skips the prompt)
+```
+
+A turn adds about 500 bytes, so size is rarely the problem; one total
+across weeks of sessions is. `--since` scopes the report, and `reset` keeps
+the old file as an archive rather than throwing your cost history away.
+
 ### Before you rely on it
 
 Routing is live from the first turn, so set a spend ceiling and check, from

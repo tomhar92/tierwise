@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readLedger, type LedgerLine } from "../src/ledger.js";
+import { filterSince, parseSince, readLedger, type LedgerLine } from "../src/ledger.js";
 import { isMainModule } from "../src/isMainModule.js";
 
 export interface Summary {
@@ -51,26 +51,63 @@ export function deltaLabel(deltaUsd: number): string {
   return rounded < 0 ? "saved" : "cost more";
 }
 
-const USAGE = "Usage: tierwise-report [path-to-ledger.jsonl]";
+const USAGE = "Usage: tierwise-report [path-to-ledger.jsonl] [--since 12h|1d|2w|YYYY-MM-DD] [--today]";
+
+export interface ReportArgs {
+  path: string | null;
+  since: Date | null;
+  error?: string;
+}
 
 /** `--help` is the only way to get the usage line now: with a default
  * path, the bare invocation is valid. */
+export function parseReportArgs(argv: string[], env: NodeJS.ProcessEnv, now: Date = new Date()): ReportArgs {
+  if (argv.includes("--help") || argv.includes("-h")) return { path: null, since: null };
+  let since: Date | null = null;
+  const positional: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--today") {
+      since = parseSince("today", now);
+    } else if (arg === "--since") {
+      const value = argv[++i];
+      since = value === undefined ? null : parseSince(value, now);
+      if (!since) return { path: null, since: null, error: `--since needs 12h, 1d, 2w, today or a date, got: ${value ?? "nothing"}` };
+    } else if (arg.startsWith("-")) {
+      return { path: null, since: null, error: `unknown option ${arg}` };
+    } else {
+      positional.push(arg);
+    }
+  }
+  return { path: positional[0] ?? env.ROUTER_LEDGER_PATH ?? "./router-ledger.jsonl", since };
+}
+
 export function resolveLedgerPath(argv: string[], env: NodeJS.ProcessEnv): string | null {
-  if (argv.includes("--help") || argv.includes("-h")) return null;
-  return argv[0] ?? env.ROUTER_LEDGER_PATH ?? "./router-ledger.jsonl";
+  return parseReportArgs(argv, env).path;
 }
 
 export function reportMain(argv: string[]): void {
-  const path = resolveLedgerPath(argv, process.env);
+  const { path, since, error } = parseReportArgs(argv, process.env);
+  if (error) {
+    console.error(`${error}\n${USAGE}`);
+    process.exitCode = 1;
+    return;
+  }
   if (!path) {
     console.log(USAGE);
     return;
   }
-  const lines = readLedger(path);
+  const all = readLedger(path);
+  const lines = since ? filterSince(all, since) : all;
   if (lines.length === 0) {
-    console.log(`No ledger entries found at ${path}`);
+    console.log(
+      since
+        ? `No ledger entries since ${since.toISOString()} at ${path} (${all.length} older)`
+        : `No ledger entries found at ${path}`
+    );
     return;
   }
+  if (since) console.log(`Since ${since.toISOString()}`);
   const s = summarize(lines);
   console.log(`Turns: ${s.turns}`);
   console.log(
