@@ -26,6 +26,12 @@ export class SseNoteInjector {
   private nextIndex = 0;
   private injected = false;
 
+  /** Whether the note went out. It does not for a reply that stops to call a
+   * tool, so the caller can hold it for a later one. */
+  get wasInjected(): boolean {
+    return this.injected;
+  }
+
   constructor(private readonly text: string) {}
 
   push(chunk: string): string {
@@ -85,13 +91,17 @@ export class SseNoteInjector {
 }
 
 /** The non-streaming equivalent: append a text block to the reply's content. */
-export function injectNoteIntoJson(body: string, text: string): string {
+export function injectNoteIntoJsonResult(body: string, text: string): { body: string; injected: boolean } {
   try {
     const parsed = JSON.parse(body) as { content?: unknown; stop_reason?: unknown };
-    if (!Array.isArray(parsed.content) || parsed.stop_reason !== "end_turn") return body;
+    if (!Array.isArray(parsed.content) || parsed.stop_reason !== "end_turn") return { body, injected: false };
     parsed.content.push({ type: "text", text });
-    return JSON.stringify(parsed);
+    return { body: JSON.stringify(parsed), injected: true };
   } catch {
-    return body;
+    return { body, injected: false };
   }
+}
+
+export function injectNoteIntoJson(body: string, text: string): string {
+  return injectNoteIntoJsonResult(body, text).body;
 }

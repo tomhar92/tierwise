@@ -239,12 +239,17 @@ numbers from the report.
   `system`-role messages, beta flags). That is modelled on one captured
   Sonnet/Haiku pair and will drift as Claude Code changes; if routed
   Haiku turns start returning 400s, set `ROUTER_MIN_TIER=sonnet`.
-- The upgrade-suggestion note is added to the reply as an extra text
-  block, and only on a turn that ends normally (not when the model stops to
-  call a tool; the next turn suggests again if it still applies). Claude
-  Code keeps it in the conversation history like any other assistant text.
-  The request itself is never modified for it, so it does not touch the cache.
-  The note is left out of what is sent to the classifier.
+- Router notes are added to the reply as an extra text block, and only on
+  a reply that ends normally, never on one that stops to call a tool. There
+  are two: an upgrade *suggestion* (you decide) and a notice that the router
+  *applied* an upgrade at a reset (with the `/model` command to go back).
+  The decision is made when your message arrives, but that reply is usually
+  a tool call, so the note is held on the conversation and shown on the
+  reply that finishes the turn, once. A newer decision replaces a waiting
+  note, and changing the model yourself cancels it. Claude Code keeps it in
+  the conversation history like any other assistant text. The request itself
+  is never modified for it, so it does not touch the cache. Notes are left
+  out of what is sent to the classifier.
 - When you change the model yourself (`/model ...`), that turn is honored
   as-is and not classified (ledger decision `manual-switch`), and the
   conversation is pinned to your choice: the router will not automatically

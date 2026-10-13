@@ -14,8 +14,8 @@ import {
   isToolResultContinuation,
   sanitizeForClassifier,
 } from "./classifyInput.js";
-import { buildUpgradeNoticeText } from "./upgradeNote.js";
-import { SseNoteInjector, injectNoteIntoJson } from "./responseNote.js";
+import { buildResetUpgradeNoticeText, buildUpgradeNoticeText } from "./upgradeNote.js";
+import { SseNoteInjector, injectNoteIntoJsonResult } from "./responseNote.js";
 import { UsageAccumulator, type UsageTotals } from "./usage.js";
 import { isMainModule } from "./isMainModule.js";
 import type { PricingConfig, Tier, ClassifyResult } from "./types.js";
@@ -187,7 +187,7 @@ async function forwardAndStream(
   signal: AbortSignal,
   rewrittenToTier?: Tier,
   notice?: string
-): Promise<{ response: Response; usage: UsageTotals }> {
+): Promise<{ response: Response; usage: UsageTotals; noticeShown: boolean }> {
   const upstreamHeaders = upstreamRequestHeaders(req);
   const betas = upstreamHeaders.get("anthropic-beta");
   if (rewrittenToTier && betas) {
@@ -210,6 +210,7 @@ async function forwardAndStream(
   const accumulator = new UsageAccumulator();
   const contentType = response.headers.get("content-type") ?? "";
   const addNotice = notice !== undefined && response.ok && response.body !== null;
+  let noticeShown = false;
   if (addNotice && contentType.includes("text/event-stream")) {
     const injector = new SseNoteInjector(notice);
     const reader = response.body!.getReader();
@@ -222,10 +223,13 @@ async function forwardAndStream(
       await writeWithBackpressure(res, injector.push(text));
     }
     await writeWithBackpressure(res, injector.flush());
+    noticeShown = injector.wasInjected;
   } else if (addNotice && contentType.includes("json")) {
     const text = await response.text();
     accumulator.push(text);
-    await writeWithBackpressure(res, injectNoteIntoJson(text, notice));
+    const result = injectNoteIntoJsonResult(text, notice);
+    noticeShown = result.injected;
+    await writeWithBackpressure(res, result.body);
   } else if (response.body) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -237,7 +241,7 @@ async function forwardAndStream(
     }
   }
   res.end();
-  return { response, usage: accumulator.finalize() };
+  return { response, usage: accumulator.finalize(), noticeShown };
 }
 
 // Anything this proxy does not reason about must reach Anthropic
@@ -537,18 +541,30 @@ export async function handleMessages(
     adaptBodyForTier(body, targetTier);
   }
 
-  // A suggested upgrade is shown to the user under the model's reply, not
+  // Router notes are shown to the user under the model's reply, not
   // injected into what the model sees: the request goes upstream unchanged,
   // so the cache is untouched and the message does not depend on the model
-  // choosing to repeat it. It only ever suggests; the user decides.
-  const notice =
-    decision.kind === "upgrade-suggested"
-      ? buildUpgradeNoticeText(decision.to, decision.estimatedCostUsd)
-      : undefined;
+  // choosing to repeat it. A note is decided here, on the classified
+  // request, but kept on the conversation until a reply ends normally:
+  // that reply is often several tool-result requests later, and those are
+  // never classified. A newly classified turn replaces whatever was
+  // waiting, and a manual /model change cancels it.
+  if (manualSwitch) {
+    state.pendingNotice = undefined;
+  } else if (classification) {
+    state.pendingNotice =
+      decision.kind === "upgrade-suggested"
+        ? buildUpgradeNoticeText(decision.to, decision.estimatedCostUsd)
+        : decision.kind === "upgraded-on-reset" && decision.to !== requestedTier
+          ? buildResetUpgradeNoticeText(decision.to, requestedTier)
+          : undefined;
+  }
+  const notice = state.pendingNotice;
 
-  const { response: upstreamResponse, usage } = await forwardAndStream(
+  const { response: upstreamResponse, usage, noticeShown } = await forwardAndStream(
     req, res, body, upstream, signal, targetTier !== requestedTier ? targetTier : undefined, notice
   );
+  if (noticeShown && state.pendingNotice === notice) state.pendingNotice = undefined;
 
   const actualModel = outgoingModel;
   const actualTier = tierForModel(pricing, actualModel) ?? targetTier;

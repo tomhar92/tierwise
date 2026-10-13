@@ -50,6 +50,11 @@ export interface ConversationState {
    * or a rewind/edit, which the store treats as a new one) - a later
    * `/model` re-pins at the new choice. */
   pinnedByUser?: boolean;
+  /** A router note waiting for a reply it can ride on. It is decided on
+   * the request that starts a user message, but that reply usually stops
+   * to call a tool, and the rest of the loop is never classified, so the
+   * note is held here until a reply ends normally. */
+  pendingNotice?: string;
 }
 
 export type Decision =

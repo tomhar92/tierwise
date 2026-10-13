@@ -16,3 +16,14 @@ export function buildUpgradeNoticeText(tier: Tier, estimatedCostUsd: number): st
     `$${estimatedCostUsd.toFixed(2)} one time. Run \`/model ${tier}\` if you want it.*`
   );
 }
+
+/** The upgrade the router applied itself at a reset (session start,
+ * `/clear`, `/compact`): the cache was being rebuilt anyway, so it cost
+ * nothing extra, but the model changed without the user asking. */
+export function buildResetUpgradeNoticeText(to: Tier, from: Tier): string {
+  return (
+    `\n\n---\n${NOTICE_MARKER} this conversation started on ${to} instead of ${from}, ` +
+    `because the request looked like it needed it (the cache was being rebuilt anyway). ` +
+    `Run \`/model ${from}\` to switch back.*`
+  );
+}
