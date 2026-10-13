@@ -18,6 +18,8 @@ export interface ClassifyResult {
   choice: Tier;
   confidence: number;
   probabilities: Record<Tier, number>;
+  /** Tokens the classifier call consumed, when the backend reports them. */
+  usage?: { inputTokens: number; outputTokens: number };
 }
 
 export interface MessageMark {

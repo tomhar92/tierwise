@@ -105,3 +105,14 @@ test("report args: --since and --today scope the window, bad values are errors",
   assert.match(parseReportArgs(["--bogus"], {}, now).error ?? "", /unknown option/);
   assert.equal(parseReportArgs(["--help"], {}, now).path, null);
 });
+
+test("summarize adds the classifier's cost and a net delta", () => {
+  const s = summarize([
+    { decision: "held", actualCostUsd: 0.1, counterfactualNoRoutingCostUsd: 0.3, classifierCostUsd: 0.001, classifierInputTokens: 5000, classifierOutputTokens: 5 },
+    { decision: "held", actualCostUsd: 0.1, counterfactualNoRoutingCostUsd: 0.1 },
+  ] as never);
+  assert.equal(s.classifierTokens, 5005);
+  assert.ok(Math.abs(s.classifierUsd - 0.001) < 1e-12);
+  assert.ok(Math.abs(s.deltaUsd - -0.2) < 1e-12);
+  assert.ok(Math.abs(s.netDeltaUsd - -0.199) < 1e-12);
+});

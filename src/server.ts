@@ -7,6 +7,7 @@ import { classifyTurn, type ClassifyInput, type ClassifyOptions } from "./classi
 import { DEFAULT_PRICING, tierForModel, computeCostUsd } from "./pricing.js";
 import { adaptBetaHeader, adaptBodyForTier } from "./adaptRequest.js";
 import { appendLedgerLine, type LedgerLine } from "./ledger.js";
+import { classifierCostUsd, classifierRates as envClassifierRates, type ClassifierRates } from "./classifierCost.js";
 import {
   extractLatestUserText,
   isSideRequest,
@@ -25,6 +26,9 @@ export interface ServerOptions {
   /** Called with every turn's ledger line after it is recorded, whether or
    * not the ledger write succeeded. The status line is fed from here. */
   onTurn?: (line: LedgerLine) => void;
+  /** Classifier prices for the ledger's cost field. Defaults to the
+   * environment (see classifierCost.ts). */
+  classifierRates?: ClassifierRates;
   pricing?: PricingConfig;
   classify?: (input: ClassifyInput, options?: ClassifyOptions) => Promise<ClassifyResult | null>;
   /** Hard cap on a buffered request body. Default 64 MiB, or
@@ -292,6 +296,7 @@ export async function handleMessages(
     options.onTurn?.(line);
   };
   const pricing = options.pricing ?? DEFAULT_PRICING;
+  const classifierRates = options.classifierRates ?? envClassifierRates(process.env);
   const classify = options.classify ?? classifyTurn;
   const maxBodyBytes = resolveMaxBodyBytes(options);
   const limits = options.limits ?? DEFAULT_LIMITS;
@@ -629,6 +634,11 @@ export async function handleMessages(
       cacheReadTokens: usage.cacheReadTokens,
       actualCostUsd,
       counterfactualNoRoutingCostUsd,
+      ...(classification?.usage && {
+        classifierInputTokens: classification.usage.inputTokens,
+        classifierOutputTokens: classification.usage.outputTokens,
+        classifierCostUsd: classifierCostUsd(classification.usage, classifierRates),
+      }),
     });
   }
 }

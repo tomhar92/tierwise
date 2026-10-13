@@ -143,6 +143,11 @@ tierwise · sonnet · 12 turns · saved $0.31 (14%) · ↑ opus suggested
 
 Tier of the latest turn, turns routed this run, savings against the
 no-routing baseline, and the pending upgrade suggestion if there is one.
+Savings are net of the classifier's own cost, which is shown beside them
+(`classifier $0.0004`; just tokens when the backend is unpriced). The cost
+comes from the token usage TypeSafe reports on each call times the prices
+in the configuration table. A call that times out reports no usage, so it
+counts as zero here even if TypeSafe bills it.
 The launcher passes this to claude with `--settings`, so none of your
 settings files are edited, and it steps aside if you already configure a
 `statusLine` (in `~/.claude/settings.json` or the project's `.claude/`).
@@ -187,6 +192,7 @@ The router warns at startup if there is no `ROUTER_MAX_TIER`.
 | `TYPESAFE_API_KEY` | TypeSafe auth (required for the hosted API, optional for a self-hosted `TYPESAFE_BASE_URL`) | — |
 | `TYPESAFE_BASE_URL` | Classifier API root; any `/v1/systemone`-compatible server | `https://api.typesafe.ai` |
 | `TYPESAFE_DEFAULT_MODEL` | Classifier model name sent to that server | `jev-latest` |
+| `TYPESAFE_PRICE_IN_PER_MTOK` / `TYPESAFE_PRICE_OUT_PER_MTOK` | USD per million classifier input / output tokens, used to price the classifier's own cost | `0.042` / `0` on the hosted API (typesafe.ai lists $42 per billion input tokens, no output price); `0` on a self-hosted `TYPESAFE_BASE_URL` |
 | `ROUTER_LEDGER_PATH` | Where turn-by-turn cost data is logged | `./router-ledger.jsonl` |
 | `PORT` | Local proxy port | `8787` |
 | `HOST` | Interface the proxy binds to | `127.0.0.1` |

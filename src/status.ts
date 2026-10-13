@@ -12,6 +12,10 @@ export interface StatusSnapshot {
   turns: number;
   actualUsd: number;
   baselineUsd: number;
+  /** What the classifier calls cost (0 when unpriced) and how many tokens
+   * they used, so savings can be stated net of the router's own overhead. */
+  classifierUsd: number;
+  classifierTokens: number;
   /** The router's pending suggestion from the latest classified turn. */
   suggestedUpgradeTo: Tier | null;
 }
@@ -21,6 +25,8 @@ export const EMPTY_SNAPSHOT: StatusSnapshot = {
   turns: 0,
   actualUsd: 0,
   baselineUsd: 0,
+  classifierUsd: 0,
+  classifierTokens: 0,
   suggestedUpgradeTo: null,
 };
 
@@ -29,6 +35,9 @@ export function applyTurn(snapshot: StatusSnapshot, line: LedgerLine): StatusSna
     ...snapshot,
     actualUsd: snapshot.actualUsd + (line.actualCostUsd ?? 0),
     baselineUsd: snapshot.baselineUsd + (line.counterfactualNoRoutingCostUsd ?? 0),
+    classifierUsd: snapshot.classifierUsd + (line.classifierCostUsd ?? 0),
+    classifierTokens:
+      snapshot.classifierTokens + (line.classifierInputTokens ?? 0) + (line.classifierOutputTokens ?? 0),
   };
   if (line.decision === "side-request") return next;
   next.turns += 1;
@@ -39,10 +48,21 @@ export function applyTurn(snapshot: StatusSnapshot, line: LedgerLine): StatusSna
   return next;
 }
 
+function formatUsd(amount: number): string {
+  // The classifier is cheap enough that two decimals would print $0.00.
+  return `$${amount >= 0.01 ? amount.toFixed(2) : amount.toFixed(4)}`;
+}
+
+function formatTokens(count: number): string {
+  return count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count);
+}
+
 export function formatStatusLine(snapshot: StatusSnapshot | null): string {
   if (!snapshot || snapshot.turns === 0) return "tierwise · waiting for the first turn";
   const parts = ["tierwise", snapshot.tier ?? "?", `${snapshot.turns} ${snapshot.turns === 1 ? "turn" : "turns"}`];
-  const delta = snapshot.actualUsd - snapshot.baselineUsd;
+  // Savings are net of the classifier: the router's own calls are a cost
+  // of routing, so leaving them out would flatter it.
+  const delta = snapshot.actualUsd + snapshot.classifierUsd - snapshot.baselineUsd;
   const rounded = Number(Math.abs(delta).toFixed(2));
   if (snapshot.baselineUsd > 0 && rounded > 0) {
     const percent = Math.round((Math.abs(delta) / snapshot.baselineUsd) * 100);
@@ -52,6 +72,8 @@ export function formatStatusLine(snapshot: StatusSnapshot | null): string {
         : `cost +$${rounded.toFixed(2)} (${percent}%)`
     );
   }
+  if (snapshot.classifierUsd > 0) parts.push(`classifier ${formatUsd(snapshot.classifierUsd)}`);
+  else if (snapshot.classifierTokens > 0) parts.push(`classifier ${formatTokens(snapshot.classifierTokens)} tok`);
   if (snapshot.suggestedUpgradeTo) parts.push(`↑ ${snapshot.suggestedUpgradeTo} suggested`);
   return parts.join(" · ");
 }

@@ -81,3 +81,16 @@ test("treats a partial probability set as an unusable answer", async () => {
   );
   assert.equal(result, null);
 });
+
+test("carries the token usage the API reports, and omits it when the backend sends none", async () => {
+  const withUsage = await classifyTurn(
+    { recentMessages: [], latestUserMessage: "x" },
+    { client: clientReturning({ ...fakeResponse("opus"), usage: { input_tokens: 1800, output_tokens: 3 } }) }
+  );
+  assert.deepEqual(withUsage?.usage, { inputTokens: 1800, outputTokens: 3 });
+  const without = await classifyTurn(
+    { recentMessages: [], latestUserMessage: "x" },
+    { client: clientReturning(fakeResponse("opus")) }
+  );
+  assert.equal(without?.usage, undefined);
+});
