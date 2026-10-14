@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "../src/loadConfig.js";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -11,6 +12,7 @@ import { createProxyServer, describeBackend, reportStartupProblems } from "../sr
 import { DEFAULT_LIMITS, type PolicyLimits } from "../src/policy.js";
 import { isMainModule } from "../src/isMainModule.js";
 import { reportMain } from "./report.js";
+import { configMain } from "./config.js";
 
 const USAGE = `tierwise - cache-aware model tier router for Claude Code
 
@@ -19,6 +21,7 @@ const USAGE = `tierwise - cache-aware model tier router for Claude Code
   tierwise serve            start a standalone proxy (PORT, HOST)
   tierwise report [path] [--since 1d|--today]   summarize a ledger
   tierwise reset [path] [--delete]        archive (or delete) the ledger and start fresh
+  tierwise config set|get|unset|list|path  keep API key and thresholds across shells
   tierwise status                         the one-line status shown inside claude
 `;
 
@@ -141,6 +144,8 @@ if (isMainModule(import.meta.url)) {
     reportMain(rest);
   } else if (command === "reset") {
     resetMain(rest).then((code) => process.exit(code));
+  } else if (command === "config") {
+    process.exit(configMain(rest));
   } else if (command === "status") {
     // Called by claude's status line on every redraw: one line, no logging.
     console.log(formatStatusLine(readSnapshot(process.env.TIERWISE_STATUS_FILE)));

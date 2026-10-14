@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "../src/loadConfig.js";
 import { filterSince, parseSince, readLedger, type LedgerLine } from "../src/ledger.js";
 import { isMainModule } from "../src/isMainModule.js";
 

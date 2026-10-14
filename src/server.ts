@@ -730,7 +730,7 @@ export function validateStartupConfig(env: NodeJS.ProcessEnv): string[] {
   if (keyRequired && !env.TYPESAFE_API_KEY?.trim()) {
     problems.push(
       "TYPESAFE_API_KEY is not set: every turn would log classifier-unavailable and the router would never route. " +
-        "Get a key at https://typesafe.ai, then run: export TYPESAFE_API_KEY=<your key>"
+        "Get a key at https://typesafe.ai, then run: tierwise config set TYPESAFE_API_KEY <your key>"
     );
   }
   if (!env.ROUTER_MAX_TIER?.trim()) {
