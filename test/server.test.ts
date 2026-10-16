@@ -683,7 +683,7 @@ test("destroys the connection instead of appending an error body when the upstre
   // `{"error":"router_proxy_error"}` JSON blob, which would corrupt the
   // stream instead of signaling failure.
   assert.ok(
-    receivedError !== null || !bodyReceived.includes("router_proxy_error"),
+    receivedError !== null || !bodyReceived.includes("api_error"),
     "a corrupted mid-stream response must not have an error JSON body appended to it"
   );
 

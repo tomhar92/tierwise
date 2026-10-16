@@ -1,3 +1,4 @@
+import { anthropicErrorBody, describeNetworkError, OutageLog } from "./networkError.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createConversationStore, updateState } from "./conversationKey.js";
 import type { ConversationStore } from "./conversationKey.js";
@@ -282,7 +283,8 @@ export async function handleMessages(
   res: ServerResponse,
   options: ServerOptions = {},
   signal: AbortSignal = new AbortController().signal,
-  conversations: ConversationStore = createConversationStore()
+  conversations: ConversationStore = createConversationStore(),
+  classifierOutage: OutageLog = new OutageLog()
 ): Promise<void> {
   const upstream = options.upstream ?? "https://api.anthropic.com";
   const ledgerPath =
@@ -485,9 +487,13 @@ export async function handleMessages(
         { signal }
       );
   if (!classification && !skipped && !manualSwitch) {
-    console.warn(
-      "tierwise: classifier unavailable this turn (TypeSafe error or timeout) - holding current tier"
-    );
+    if (classifierOutage.failed()) {
+      console.warn(
+        "tierwise: classifier unavailable (TypeSafe error or timeout) - holding the current tier until it recovers"
+      );
+    }
+  } else if (classification && classifierOutage.succeeded()) {
+    console.warn("tierwise: classifier available again");
   }
 
   const marginInfo = classification
@@ -652,6 +658,7 @@ function rejectsAsBrowserRequest(req: IncomingMessage, res: ServerResponse): boo
 
 export function createProxyServer(options: ServerOptions = {}) {
   const conversations = createConversationStore();
+  const classifierOutage = new OutageLog();
   return createServer((req, res) => {
     if (rejectsAsBrowserRequest(req, res)) return;
     // A client that hangs up mid-turn should not leave us paying for a
@@ -673,7 +680,7 @@ export function createProxyServer(options: ServerOptions = {}) {
     }
 
     const run = routed
-      ? handleMessages(req, res, options, abort.signal, conversations)
+      ? handleMessages(req, res, options, abort.signal, conversations, classifierOutage)
       : passThroughRequest(req, res, options, abort.signal);
 
     run.catch((err) => {
@@ -693,10 +700,12 @@ export function createProxyServer(options: ServerOptions = {}) {
         }
         return;
       }
-      console.error("router error", err);
+      const network = describeNetworkError(err);
+      if (network) console.warn(`tierwise: ${network}`);
+      else console.error("router error", err);
       if (!res.headersSent) {
         res.writeHead(502, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: "router_proxy_error" }));
+        res.end(anthropicErrorBody(network ?? "internal proxy error, see the router log"));
         return;
       }
       res.destroy(err instanceof Error ? err : new Error(String(err)));
