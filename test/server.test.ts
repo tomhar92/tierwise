@@ -1612,6 +1612,39 @@ test("onTurn receives every recorded turn, even when the ledger cannot be writte
   fake.close();
 });
 
+test("the ledger records what each classifier call consumed and cost", async () => {
+  const fake = await withFakeUpstream(() => ({
+    status: 200,
+    usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    text: "ok",
+  }));
+  const ledgerPath = join(mkdtempSync(join(tmpdir(), "ledger-")), "ledger.jsonl");
+  const router = createProxyServer({
+    upstream: fake.url,
+    ledgerPath,
+    classifierRates: { inputUsdPerMTok: 1, outputUsdPerMTok: 2 },
+    classify: async () => ({
+      choice: "sonnet",
+      confidence: 0.8,
+      probabilities: { haiku: 0.05, sonnet: 0.8, opus: 0.1, fable: 0.05 },
+      usage: { inputTokens: 3000, outputTokens: 10 },
+    }),
+  });
+  const port = await listen(router);
+  const response = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: DEFAULT_PRICING.modelAlias.sonnet, tools: TOOLS, messages: [{ role: "user", content: "hi" }] }),
+  });
+  await response.text();
+  const [entry] = readLedger(ledgerPath);
+  assert.equal(entry.classifierInputTokens, 3000);
+  assert.equal(entry.classifierOutputTokens, 10);
+  assert.ok(Math.abs((entry.classifierCostUsd ?? 0) - 0.00302) < 1e-12);
+  router.close();
+  fake.close();
+});
+
 test("honors policy limits passed in the server options instead of only the environment defaults", async () => {
   const fake = await withFakeUpstream(() => ({
     status: 200,

@@ -46,7 +46,7 @@ export async function classifyTurn(
 ): Promise<ClassifyResult | null> {
   const { timeoutMs = 2000, signal, client: injected } = options;
   try {
-    const { answers } = await (injected ?? getClient()).systemOne(
+    const { answers, usage } = await (injected ?? getClient()).systemOne(
       {
         state: {
           recentMessages: input.recentMessages,
@@ -77,6 +77,7 @@ export async function classifyTurn(
       choice: answer.choice,
       confidence: answer.confidence,
       probabilities: { ...answer.probabilities },
+      ...(usage && { usage: { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens } }),
     };
   } catch {
     return null;

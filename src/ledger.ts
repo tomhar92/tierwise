@@ -42,6 +42,11 @@ export interface LedgerLine {
   cacheReadTokens: number;
   actualCostUsd: number | null;
   counterfactualNoRoutingCostUsd: number | null;
+  /** What the classifier call for this turn consumed and cost. Absent on
+   * older lines and on turns with no call (or no usage reported). */
+  classifierInputTokens?: number;
+  classifierOutputTokens?: number;
+  classifierCostUsd?: number;
 }
 
 export function appendLedgerLine(path: string, line: LedgerLine): void {
