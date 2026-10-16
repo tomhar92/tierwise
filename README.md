@@ -182,6 +182,18 @@ The router warns at startup if there is no `ROUTER_MAX_TIER`.
 
 ## Configuration
 
+Settings can live in environment variables or in a config file that works in
+every shell. `tierwise config set TYPESAFE_API_KEY <key>` stores a value in
+`~/.tierwise/config.json` (owner-only permissions, plaintext like `~/.npmrc`),
+`get`, `unset` and `list` read and remove them, and `list` shows whether each
+value comes from the environment, the file or the default. An environment
+variable always overrides the file. `TIERWISE_CONFIG` moves the file.
+
+The file accepts `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`,
+`TYPESAFE_DEFAULT_MODEL`, `ROUTER_MARGIN_THRESHOLD`,
+`ROUTER_STICKY_ASSUMPTION`, `ROUTER_RESET_CONFIDENCE_FLOOR`,
+`ROUTER_MIN_TIER`, `ROUTER_MAX_TIER` and `ROUTER_LEDGER_PATH`.
+
 | Env var | Purpose | Default |
 | --- | --- | --- |
 | `TYPESAFE_API_KEY` | TypeSafe auth (required for the hosted API, optional for a self-hosted `TYPESAFE_BASE_URL`) | — |

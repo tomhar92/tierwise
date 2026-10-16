@@ -84,7 +84,7 @@ test("the launcher caps spend at opus unless the operator chose a ceiling", () =
 test("the missing-key message says where to get one and how to set it", () => {
   const [problem] = validateStartupConfig({});
   assert.match(problem, /typesafe\.ai/);
-  assert.match(problem, /export TYPESAFE_API_KEY=/);
+  assert.match(problem, /tierwise config set TYPESAFE_API_KEY/);
 });
 
 test("bare launch runs claude with the user's arguments behind the proxy", async () => {
