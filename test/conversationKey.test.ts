@@ -151,7 +151,9 @@ test("keeps no message bodies, and bounds the states kept per first message", ()
     const messages = [...turn(1), { role: "assistant", content: "x" }, { role: "user", content: `divergent-${i}` }];
     const state = store.getOrInitState({}, "sonnet", messages);
     updateState(state, "sonnet", USAGE, messages);
-    assert.deepEqual(Object.keys(state.lastMark).sort(), ["count", "digest"]);
+    // Only counts and hashes are kept; a block's text never appears in the mark.
+    assert.deepEqual(Object.keys(state.lastMark).sort(), ["count", "digest", "digests", "shapes"]);
+    assert.doesNotMatch(JSON.stringify(state.lastMark), /divergent-|"x"/);
     states.add(state);
   }
   assert.equal(states.size, 20);

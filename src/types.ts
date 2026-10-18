@@ -25,7 +25,25 @@ export interface ClassifyResult {
 export interface MessageMark {
   count: number;
   digest: string;
+  /** One hash per message, so a later mismatch can say which message moved. */
+  digests?: string[];
+  /** One shape per message (role and block types with short content hashes). */
+  shapes?: string[];
 }
+
+/** Why a request was not recognized as continuing a tracked conversation.
+ * Types and short hashes only, never message text. */
+export type IdentityNote =
+  | { reason: "new-first-message" }
+  | { reason: "shorter"; previousCount: number; currentCount: number }
+  | {
+      reason: "diverged";
+      at: number;
+      previousCount: number;
+      currentCount: number;
+      /** `index: before -> after` for each block of the message that changed. */
+      changedBlocks: string[];
+    };
 
 export interface ConversationState {
   /** Stable per-socket id for this conversation, used as the ledger's
@@ -55,6 +73,9 @@ export interface ConversationState {
    * to call a tool, and the rest of the loop is never classified, so the
    * note is held here until a reply ends normally. */
   pendingNotice?: string;
+  /** Set when this state was created because a request with a known first
+   * message did not continue any tracked conversation. Logged once. */
+  identityNote?: IdentityNote;
 }
 
 export type Decision =

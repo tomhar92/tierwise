@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { ConversationState, Tier } from "./types.js";
-import { detectReset, EMPTY_MARK, markMessages, stripCacheControl } from "./reset.js";
+import type { ConversationState, IdentityNote, Tier } from "./types.js";
+import { detectReset, diagnoseDivergence, EMPTY_MARK, markMessages, stripCacheControl } from "./reset.js";
 
 const store = new WeakMap<object, ConversationState>();
 
@@ -85,6 +85,11 @@ export function createConversationStore(): ConversationStore {
           }
         }
       }
+      let identityNote: IdentityNote | undefined;
+      if (key !== null) {
+        const newest = (byFingerprint.get(key) ?? []).at(-1);
+        identityNote = newest ? diagnoseDivergence(newest.lastMark, messages) : { reason: "new-first-message" };
+      }
       let state = key === null ? store.get(socket) : undefined;
       if (!state) {
         nextConnectionId += 1;
@@ -98,6 +103,7 @@ export function createConversationStore(): ConversationStore {
           lastMark: EMPTY_MARK,
           lastRequestedTier: initialTier,
         };
+        if (identityNote) state.identityNote = identityNote;
         if (key === null) store.set(socket, state);
         else remember(state, key);
       }
