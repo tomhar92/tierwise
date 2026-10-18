@@ -19,7 +19,7 @@ import { buildResetUpgradeNoticeText, buildUpgradeNoticeText } from "./upgradeNo
 import { SseNoteInjector, injectNoteIntoJsonResult } from "./responseNote.js";
 import { UsageAccumulator, type UsageTotals } from "./usage.js";
 import { isMainModule } from "./isMainModule.js";
-import type { PricingConfig, Tier, ClassifyResult } from "./types.js";
+import type { PricingConfig, Tier, ClassifyResult, ConversationState, IdentityNote } from "./types.js";
 
 export interface ServerOptions {
   upstream?: string;
@@ -123,6 +123,13 @@ function recordLedger(path: string, line: LedgerLine): void {
       `tierwise: could not write ledger ${path}: ${err instanceof Error ? err.message : String(err)}`
     );
   }
+}
+
+/** The identity note belongs on the first ledger line of a state, once. */
+function takeIdentityNote(state: ConversationState): { identity?: IdentityNote } {
+  const identity = state.identityNote;
+  delete state.identityNote;
+  return identity ? { identity } : {};
 }
 
 function requestPath(url: string | undefined): string {
@@ -418,6 +425,7 @@ export async function handleMessages(
         upgradeMargin: 0,
         decision: "unknown-model",
         resetDetected: false,
+        ...takeIdentityNote(state),
         suggestedUpgradeTo: null,
         suggestedUpgradeCostUsd: null,
         actualModel: String(requestedModel ?? ""),
@@ -644,6 +652,7 @@ export async function handleMessages(
             : "classifier-unavailable",
       resetDetected:
         decision.kind === "downgraded-on-reset" || decision.kind === "upgraded-on-reset",
+      ...takeIdentityNote(state),
       suggestedUpgradeTo: decision.kind === "upgrade-suggested" ? decision.to : null,
       suggestedUpgradeCostUsd:
         decision.kind === "upgrade-suggested" ? decision.estimatedCostUsd : null,

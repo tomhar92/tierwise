@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { MessageMark } from "./types.js";
+import type { IdentityNote, MessageMark } from "./types.js";
 
 // Claude Code moves the `cache_control` breakpoint marker onto whichever
 // content block is now the end of the cacheable prefix, so the same
@@ -37,10 +37,50 @@ function digestPrefix(messages: unknown[], count: number): string {
   return hash.digest("hex");
 }
 
+function shortHash(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(stripCacheControl(value)) ?? "null").digest("hex").slice(0, 4);
+}
+
+function blockLabels(message: unknown): string[] {
+  const content = (message as { content?: unknown } | null)?.content;
+  if (typeof content === "string") return [`string#${shortHash(content)}`];
+  if (!Array.isArray(content)) return [`none#${shortHash(content)}`];
+  return content.map((block) => `${(block as { type?: unknown } | null)?.type ?? "?"}#${shortHash(block)}`);
+}
+
+function shapeOf(message: unknown): string {
+  const role = (message as { role?: unknown } | null)?.role ?? "?";
+  return `${role}:${blockLabels(message).join("+")}`;
+}
+
 export const EMPTY_MARK: MessageMark = { count: 0, digest: "" };
 
 export function markMessages(messages: unknown[]): MessageMark {
-  return { count: messages.length, digest: digestPrefix(messages, messages.length) };
+  return {
+    count: messages.length,
+    digest: digestPrefix(messages, messages.length),
+    digests: messages.map((message) => shortHash(message)),
+    shapes: messages.map(shapeOf),
+  };
+}
+
+/** Says where `currentMessages` stopped matching `last`, for the ledger. */
+export function diagnoseDivergence(last: MessageMark, currentMessages: unknown[]): IdentityNote | undefined {
+  if (currentMessages.length < last.count) {
+    return { reason: "shorter", previousCount: last.count, currentCount: currentMessages.length };
+  }
+  const digests = last.digests ?? [];
+  for (let i = 0; i < last.count && i < digests.length; i++) {
+    if (shortHash(currentMessages[i]) === digests[i]) continue;
+    const before = (last.shapes?.[i] ?? "").split(":").slice(1).join(":").split("+");
+    const after = blockLabels(currentMessages[i]);
+    const changedBlocks: string[] = [];
+    for (let b = 0; b < Math.max(before.length, after.length); b++) {
+      if (before[b] !== after[b]) changedBlocks.push(`${b}: ${before[b] ?? "(none)"} -> ${after[b] ?? "(none)"}`);
+    }
+    return { reason: "diverged", at: i, previousCount: last.count, currentCount: currentMessages.length, changedBlocks };
+  }
+  return undefined;
 }
 
 /** True unless `currentMessages` begins with exactly the messages that

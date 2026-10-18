@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import type { Tier } from "./types.js";
+import type { IdentityNote, Tier } from "./types.js";
 
 export { computeCostUsd } from "./pricing.js";
 
@@ -26,6 +26,9 @@ export interface LedgerLine {
    * silently masquerade as normal routing. */
   decision: string;
   resetDetected: boolean;
+  /** Why this request started a new conversation although its first message
+   * was already tracked. Present only on the first line of such a state. */
+  identity?: IdentityNote;
   suggestedUpgradeTo: Tier | null;
   suggestedUpgradeCostUsd: number | null;
   actualModel: string;
