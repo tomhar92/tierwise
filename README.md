@@ -143,6 +143,11 @@ tierwise · sonnet · 12 turns · saved $0.31 (14%) · ↑ opus suggested
 
 Tier of the latest turn, turns routed this run, savings against the
 no-routing baseline, and the pending upgrade suggestion if there is one.
+Savings are net of the classifier's own cost, which is shown beside them
+(`classifier $0.0004`; just tokens when the backend is unpriced). The cost
+comes from the token usage TypeSafe reports on each call times the prices
+in the configuration table. A call that times out reports no usage, so it
+counts as zero here even if TypeSafe bills it.
 The launcher passes this to claude with `--settings`, so none of your
 settings files are edited, and it steps aside if you already configure a
 `statusLine` (in `~/.claude/settings.json` or the project's `.claude/`).
@@ -199,6 +204,7 @@ The file accepts `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`,
 | `TYPESAFE_API_KEY` | TypeSafe auth (required for the hosted API, optional for a self-hosted `TYPESAFE_BASE_URL`) | — |
 | `TYPESAFE_BASE_URL` | Classifier API root; any `/v1/systemone`-compatible server | `https://api.typesafe.ai` |
 | `TYPESAFE_DEFAULT_MODEL` | Classifier model name sent to that server | `jev-latest` |
+| `TYPESAFE_PRICE_IN_PER_MTOK` / `TYPESAFE_PRICE_OUT_PER_MTOK` | USD per million classifier input / output tokens, used to price the classifier's own cost | `0.042` / `0` on the hosted API (typesafe.ai lists $42 per billion input tokens, no output price); `0` on a self-hosted `TYPESAFE_BASE_URL` |
 | `ROUTER_LEDGER_PATH` | Where turn-by-turn cost data is logged | `./router-ledger.jsonl` |
 | `PORT` | Local proxy port | `8787` |
 | `HOST` | Interface the proxy binds to | `127.0.0.1` |
@@ -245,12 +251,17 @@ numbers from the report.
   `system`-role messages, beta flags). That is modelled on one captured
   Sonnet/Haiku pair and will drift as Claude Code changes; if routed
   Haiku turns start returning 400s, set `ROUTER_MIN_TIER=sonnet`.
-- The upgrade-suggestion note is added to the reply as an extra text
-  block, and only on a turn that ends normally (not when the model stops to
-  call a tool; the next turn suggests again if it still applies). Claude
-  Code keeps it in the conversation history like any other assistant text.
-  The request itself is never modified for it, so it does not touch the cache.
-  The note is left out of what is sent to the classifier.
+- Router notes are added to the reply as an extra text block, and only on
+  a reply that ends normally, never on one that stops to call a tool. There
+  are two: an upgrade *suggestion* (you decide) and a notice that the router
+  *applied* an upgrade at a reset (with the `/model` command to go back).
+  The decision is made when your message arrives, but that reply is usually
+  a tool call, so the note is held on the conversation and shown on the
+  reply that finishes the turn, once. A newer decision replaces a waiting
+  note, and changing the model yourself cancels it. Claude Code keeps it in
+  the conversation history like any other assistant text. The request itself
+  is never modified for it, so it does not touch the cache. Notes are left
+  out of what is sent to the classifier.
 - When you change the model yourself (`/model ...`), that turn is honored
   as-is and not classified (ledger decision `manual-switch`), and the
   conversation is pinned to your choice: the router will not automatically

@@ -93,3 +93,22 @@ test("an unwritable status path warns instead of breaking the turn", () => {
   const record = createStatusTracker("/nonexistent-dir/status.json");
   assert.doesNotThrow(() => record(line()));
 });
+
+test("savings are net of the classifier, which is shown in dollars when priced", () => {
+  const snapshot = applyTurn(
+    EMPTY_SNAPSHOT,
+    line({ actualCostUsd: 0.1, counterfactualNoRoutingCostUsd: 0.4, classifierCostUsd: 0.0004, classifierInputTokens: 9000 })
+  );
+  assert.equal(snapshot.classifierTokens, 9000);
+  assert.equal(formatStatusLine(snapshot), "tierwise · sonnet · 1 turn · saved $0.30 (75%) · classifier $0.0004");
+});
+
+test("an unpriced classifier shows tokens, and a cost that outweighs the saving flips the label", () => {
+  const unpriced = applyTurn(EMPTY_SNAPSHOT, line({ classifierInputTokens: 18_000, classifierOutputTokens: 200 }));
+  assert.match(formatStatusLine(unpriced), /classifier 18\.2k tok/);
+  const dear = applyTurn(
+    EMPTY_SNAPSHOT,
+    line({ actualCostUsd: 0.2, counterfactualNoRoutingCostUsd: 0.2, classifierCostUsd: 0.05 })
+  );
+  assert.match(formatStatusLine(dear), /cost \+\$0\.05 \(25%\)/);
+});

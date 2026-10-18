@@ -17,12 +17,21 @@ export interface Summary {
   totalActualUsd: number;
   totalCounterfactualUsd: number;
   deltaUsd: number;
+  classifierUsd: number;
+  classifierTokens: number;
+  /** Delta including the classifier's own cost: what routing really saved. */
+  netDeltaUsd: number;
 }
 
 export function summarize(lines: LedgerLine[]): Summary {
   const totalActualUsd = lines.reduce((sum, l) => sum + (l.actualCostUsd ?? 0), 0);
   const totalCounterfactualUsd = lines.reduce(
     (sum, l) => sum + (l.counterfactualNoRoutingCostUsd ?? 0),
+    0
+  );
+  const classifierUsd = lines.reduce((sum, l) => sum + (l.classifierCostUsd ?? 0), 0);
+  const classifierTokens = lines.reduce(
+    (sum, l) => sum + (l.classifierInputTokens ?? 0) + (l.classifierOutputTokens ?? 0),
     0
   );
   return {
@@ -41,6 +50,9 @@ export function summarize(lines: LedgerLine[]): Summary {
     totalActualUsd,
     totalCounterfactualUsd,
     deltaUsd: totalActualUsd - totalCounterfactualUsd,
+    classifierUsd,
+    classifierTokens,
+    netDeltaUsd: totalActualUsd + classifierUsd - totalCounterfactualUsd,
   };
 }
 
@@ -144,6 +156,14 @@ export function reportMain(argv: string[]): void {
   console.log(
     `Delta:               $${s.deltaUsd.toFixed(4)} (${deltaLabel(s.deltaUsd)})`
   );
+  if (s.classifierTokens > 0) {
+    console.log(
+      `Classifier:          $${s.classifierUsd.toFixed(4)} (${s.classifierTokens} tokens${s.classifierUsd === 0 ? ", unpriced - set TYPESAFE_PRICE_IN_PER_MTOK" : ""})`
+    );
+    console.log(
+      `Net delta:           $${s.netDeltaUsd.toFixed(4)} (${deltaLabel(s.netDeltaUsd)}, after the classifier)`
+    );
+  }
 }
 
 if (isMainModule(import.meta.url)) {

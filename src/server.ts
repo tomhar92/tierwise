@@ -8,14 +8,15 @@ import { classifyTurn, type ClassifyInput, type ClassifyOptions } from "./classi
 import { DEFAULT_PRICING, tierForModel, computeCostUsd } from "./pricing.js";
 import { adaptBetaHeader, adaptBodyForTier } from "./adaptRequest.js";
 import { appendLedgerLine, type LedgerLine } from "./ledger.js";
+import { classifierCostUsd, classifierRates as envClassifierRates, type ClassifierRates } from "./classifierCost.js";
 import {
   extractLatestUserText,
   isSideRequest,
   isToolResultContinuation,
   sanitizeForClassifier,
 } from "./classifyInput.js";
-import { buildUpgradeNoticeText } from "./upgradeNote.js";
-import { SseNoteInjector, injectNoteIntoJson } from "./responseNote.js";
+import { buildResetUpgradeNoticeText, buildUpgradeNoticeText } from "./upgradeNote.js";
+import { SseNoteInjector, injectNoteIntoJsonResult } from "./responseNote.js";
 import { UsageAccumulator, type UsageTotals } from "./usage.js";
 import { isMainModule } from "./isMainModule.js";
 import type { PricingConfig, Tier, ClassifyResult } from "./types.js";
@@ -26,6 +27,9 @@ export interface ServerOptions {
   /** Called with every turn's ledger line after it is recorded, whether or
    * not the ledger write succeeded. The status line is fed from here. */
   onTurn?: (line: LedgerLine) => void;
+  /** Classifier prices for the ledger's cost field. Defaults to the
+   * environment (see classifierCost.ts). */
+  classifierRates?: ClassifierRates;
   pricing?: PricingConfig;
   classify?: (input: ClassifyInput, options?: ClassifyOptions) => Promise<ClassifyResult | null>;
   /** Hard cap on a buffered request body. Default 64 MiB, or
@@ -184,7 +188,7 @@ async function forwardAndStream(
   signal: AbortSignal,
   rewrittenToTier?: Tier,
   notice?: string
-): Promise<{ response: Response; usage: UsageTotals }> {
+): Promise<{ response: Response; usage: UsageTotals; noticeShown: boolean }> {
   const upstreamHeaders = upstreamRequestHeaders(req);
   const betas = upstreamHeaders.get("anthropic-beta");
   if (rewrittenToTier && betas) {
@@ -207,6 +211,7 @@ async function forwardAndStream(
   const accumulator = new UsageAccumulator();
   const contentType = response.headers.get("content-type") ?? "";
   const addNotice = notice !== undefined && response.ok && response.body !== null;
+  let noticeShown = false;
   if (addNotice && contentType.includes("text/event-stream")) {
     const injector = new SseNoteInjector(notice);
     const reader = response.body!.getReader();
@@ -219,10 +224,13 @@ async function forwardAndStream(
       await writeWithBackpressure(res, injector.push(text));
     }
     await writeWithBackpressure(res, injector.flush());
+    noticeShown = injector.wasInjected;
   } else if (addNotice && contentType.includes("json")) {
     const text = await response.text();
     accumulator.push(text);
-    await writeWithBackpressure(res, injectNoteIntoJson(text, notice));
+    const result = injectNoteIntoJsonResult(text, notice);
+    noticeShown = result.injected;
+    await writeWithBackpressure(res, result.body);
   } else if (response.body) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -234,7 +242,7 @@ async function forwardAndStream(
     }
   }
   res.end();
-  return { response, usage: accumulator.finalize() };
+  return { response, usage: accumulator.finalize(), noticeShown };
 }
 
 // Anything this proxy does not reason about must reach Anthropic
@@ -294,6 +302,7 @@ export async function handleMessages(
     options.onTurn?.(line);
   };
   const pricing = options.pricing ?? DEFAULT_PRICING;
+  const classifierRates = options.classifierRates ?? envClassifierRates(process.env);
   const classify = options.classify ?? classifyTurn;
   const maxBodyBytes = resolveMaxBodyBytes(options);
   const limits = options.limits ?? DEFAULT_LIMITS;
@@ -538,18 +547,30 @@ export async function handleMessages(
     adaptBodyForTier(body, targetTier);
   }
 
-  // A suggested upgrade is shown to the user under the model's reply, not
+  // Router notes are shown to the user under the model's reply, not
   // injected into what the model sees: the request goes upstream unchanged,
   // so the cache is untouched and the message does not depend on the model
-  // choosing to repeat it. It only ever suggests; the user decides.
-  const notice =
-    decision.kind === "upgrade-suggested"
-      ? buildUpgradeNoticeText(decision.to, decision.estimatedCostUsd)
-      : undefined;
+  // choosing to repeat it. A note is decided here, on the classified
+  // request, but kept on the conversation until a reply ends normally:
+  // that reply is often several tool-result requests later, and those are
+  // never classified. A newly classified turn replaces whatever was
+  // waiting, and a manual /model change cancels it.
+  if (manualSwitch) {
+    state.pendingNotice = undefined;
+  } else if (classification) {
+    state.pendingNotice =
+      decision.kind === "upgrade-suggested"
+        ? buildUpgradeNoticeText(decision.to, decision.estimatedCostUsd)
+        : decision.kind === "upgraded-on-reset" && decision.to !== requestedTier
+          ? buildResetUpgradeNoticeText(decision.to, requestedTier)
+          : undefined;
+  }
+  const notice = state.pendingNotice;
 
-  const { response: upstreamResponse, usage } = await forwardAndStream(
+  const { response: upstreamResponse, usage, noticeShown } = await forwardAndStream(
     req, res, body, upstream, signal, targetTier !== requestedTier ? targetTier : undefined, notice
   );
+  if (noticeShown && state.pendingNotice === notice) state.pendingNotice = undefined;
 
   const actualModel = outgoingModel;
   const actualTier = tierForModel(pricing, actualModel) ?? targetTier;
@@ -635,6 +656,11 @@ export async function handleMessages(
       cacheReadTokens: usage.cacheReadTokens,
       actualCostUsd,
       counterfactualNoRoutingCostUsd,
+      ...(classification?.usage && {
+        classifierInputTokens: classification.usage.inputTokens,
+        classifierOutputTokens: classification.usage.outputTokens,
+        classifierCostUsd: classifierCostUsd(classification.usage, classifierRates),
+      }),
     });
   }
 }
