@@ -76,3 +76,28 @@ test("still flags a real content change even when cache_control also differs", (
   ];
   assert.equal(detectReset(markMessages(last), current), true);
 });
+
+// Claude Code sends the newest user prompt as a list of one text block (which
+// can carry the cache marker) and the same prompt as a plain string once it is
+// older. The API sees identical tokens, so the router must too.
+test("a prompt sent as a list and later as a plain string is the same history", () => {
+  const asList = [{ role: "user", content: [{ type: "text", text: "do the thing", cache_control: { type: "ephemeral" } }] }];
+  const asString = [
+    { role: "user", content: "do the thing" },
+    { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }] },
+  ];
+  assert.equal(detectReset(markMessages(asList), asString), false);
+  assert.equal(detectReset(markMessages(asString.slice(0, 1)), asList), false);
+});
+
+test("a tool result sent as a string or as one text block is the same history", () => {
+  const asString = [{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] }];
+  const asList = [{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: [{ type: "text", text: "ok" }] }] }];
+  assert.equal(detectReset(markMessages(asString), asList), false);
+});
+
+test("different text is still a reset, in either form", () => {
+  const a = [{ role: "user", content: "one" }];
+  assert.equal(detectReset(markMessages(a), [{ role: "user", content: [{ type: "text", text: "two" }] }]), true);
+  assert.equal(detectReset(markMessages(a), [{ role: "assistant", content: "one" }]), true);
+});

@@ -94,3 +94,36 @@ test("the ledger records the note once, on the first line of the new conversatio
     upstream.close();
   }
 });
+
+test("a prompt that turns from a list into a string stays one conversation in the ledger", async () => {
+  const upstream = createServer((req, res) => {
+    req.resume();
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ type: "message", content: [], usage: { input_tokens: 1, output_tokens: 1 }, stop_reason: "tool_use" }));
+  });
+  const upstreamPort = await new Promise<number>((r) => upstream.listen(0, () => r((upstream.address() as { port: number }).port)));
+  const ledgerPath = join(mkdtempSync(join(tmpdir(), "ledger-")), "l.jsonl");
+  const router = createProxyServer({ upstream: `http://127.0.0.1:${upstreamPort}`, ledgerPath, classify: async () => null });
+  const port = await new Promise<number>((r) => router.listen(0, () => r((router.address() as { port: number }).port)));
+  const send = (messages: unknown[]) =>
+    fetch(`http://127.0.0.1:${port}/v1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 10, tools: [{ name: "Read" }], messages }),
+    }).then((r) => r.text());
+  try {
+    await send([{ role: "user", content: [{ type: "text", text: "do it", cache_control: { type: "ephemeral" } }] }]);
+    await send([
+      { role: "user", content: "do it" },
+      reply,
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] },
+    ]);
+    const lines = readLedger(ledgerPath);
+    assert.equal(lines.length, 2);
+    assert.equal(lines[0].conversationKey, lines[1].conversationKey);
+    assert.equal(lines[1].identity, undefined);
+  } finally {
+    router.close();
+    upstream.close();
+  }
+});
