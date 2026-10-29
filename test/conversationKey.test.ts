@@ -161,3 +161,19 @@ test("keeps no message bodies, and bounds the states kept per first message", ()
   const replay = [...turn(1), { role: "assistant", content: "x" }, { role: "user", content: "divergent-0" }];
   assert.equal(store.getOrInitState({}, "sonnet", replay).lastMark.count, 0);
 });
+
+test("the conversation survives its first prompt changing from a list to a string", () => {
+  const store = createConversationStore();
+  const listForm = [{ role: "user", content: [{ type: "text", text: "start", cache_control: { type: "ephemeral" } }] }];
+  const state = store.getOrInitState({}, "sonnet", listForm);
+  updateState(state, "opus", USAGE, listForm);
+  const later = [
+    { role: "user", content: "start" },
+    { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] },
+  ];
+  const next = store.getOrInitState({}, "sonnet", later);
+  assert.equal(next, state);
+  assert.equal(next.currentTier, "opus");
+  assert.equal(next.identityNote?.reason, "new-first-message");
+});
