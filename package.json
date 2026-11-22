@@ -1,6 +1,6 @@
 {
   "name": "tierwise",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Cache-aware model tier router for Claude Code",
   "type": "module",
   "license": "MIT",
