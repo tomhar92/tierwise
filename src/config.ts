@@ -77,12 +77,19 @@ export function writeConfig(path: string, values: Record<string, string>): void 
   renameSync(temp, path);
 }
 
-/** Fills `env` with every stored value it does not already set. */
-export function applyConfig(env: NodeJS.ProcessEnv, path: string = configPath(env)): void {
+/** Fills `env` with every stored value it does not already set, and returns
+ * the settings where the environment kept a value different from the file's,
+ * which is how a stale exported key silently beats a new one in the file. */
+export function applyConfig(env: NodeJS.ProcessEnv, path: string = configPath(env)): string[] {
   const stored = readConfig(path);
+  const overridden: string[] = [];
   for (const [key, value] of Object.entries(stored)) {
-    if (key in SETTINGS && !env[key]?.trim()) env[key] = value;
+    if (!(key in SETTINGS)) continue;
+    const current = env[key]?.trim();
+    if (!current) env[key] = value;
+    else if (current !== value.trim()) overridden.push(key);
   }
+  return overridden;
 }
 
 export function maskSecret(value: string): string {

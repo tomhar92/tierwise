@@ -23,21 +23,30 @@ test("a request that changes an earlier message is reported with the block that 
   const store = createConversationStore();
   const before = [first, reply, { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "A" }] }];
   seed(store, before);
+  const changedReply = { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Grep", input: {} }] };
   const after = [
     first,
-    reply,
-    { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "B" }] },
+    changedReply,
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "A" }] },
     { role: "assistant", content: [{ type: "text", text: "ok" }] },
   ];
   const state = store.getOrInitState({}, "sonnet", after);
   const note = state.identityNote;
   assert.equal(note?.reason, "diverged");
   if (note?.reason !== "diverged") return;
-  assert.equal(note.at, 2);
+  assert.equal(note.at, 1);
   assert.equal(note.previousCount, 3);
   assert.equal(note.currentCount, 4);
   assert.equal(note.changedBlocks.length, 1);
-  assert.match(note.changedBlocks[0], /^0: tool_result#[0-9a-f]{4} -> tool_result#[0-9a-f]{4}$/);
+  assert.match(note.changedBlocks[0], /^0: tool_use#[0-9a-f]{4} -> tool_use#[0-9a-f]{4}$/);
+});
+
+test("replacing only the newest recorded message is not an identity break", () => {
+  const store = createConversationStore();
+  const before = [first, reply, { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "A" }] }];
+  const state = seed(store, before);
+  const after = [first, reply, { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "B" }] }];
+  assert.equal(store.getOrInitState({}, "sonnet", after), state);
 });
 
 test("a shorter history is reported as shorter", () => {
@@ -83,7 +92,7 @@ test("the ledger records the note once, on the first line of the new conversatio
   try {
     await send([first]);
     await send([first, reply, { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "A" }] }]);
-    await send([first, reply, { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "B" }] }, { role: "assistant", content: "x" }, { role: "user", content: "y" }]);
+    await send([first, { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Grep", input: {} }] }, { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "A" }] }, { role: "assistant", content: "x" }, { role: "user", content: "y" }]);
     const lines = readLedger(ledgerPath);
     assert.equal(lines.length, 3);
     assert.equal(lines[0].identity?.reason, "new-first-message");

@@ -148,17 +148,19 @@ test("keeps no message bodies, and bounds the states kept per first message", ()
   const store = createConversationStore();
   const states = new Set<unknown>();
   for (let i = 0; i < 20; i++) {
-    const messages = [...turn(1), { role: "assistant", content: "x" }, { role: "user", content: `divergent-${i}` }];
+    // The histories differ in an earlier message; differing only in the last one
+    // is the same conversation.
+    const messages = [...turn(1), { role: "assistant", content: `divergent-${i}` }, { role: "user", content: "tail" }];
     const state = store.getOrInitState({}, "sonnet", messages);
     updateState(state, "sonnet", USAGE, messages);
     // Only counts and hashes are kept; a block's text never appears in the mark.
-    assert.deepEqual(Object.keys(state.lastMark).sort(), ["count", "digest", "digests", "shapes"]);
-    assert.doesNotMatch(JSON.stringify(state.lastMark), /divergent-|"x"/);
+    assert.deepEqual(Object.keys(state.lastMark).sort(), ["count", "digest", "digests", "prefixDigest", "shapes"]);
+    assert.doesNotMatch(JSON.stringify(state.lastMark), /divergent-|"tail"/);
     states.add(state);
   }
   assert.equal(states.size, 20);
   // The oldest were dropped: replaying the first one finds nothing to continue.
-  const replay = [...turn(1), { role: "assistant", content: "x" }, { role: "user", content: "divergent-0" }];
+  const replay = [...turn(1), { role: "assistant", content: "divergent-0" }, { role: "user", content: "tail" }];
   assert.equal(store.getOrInitState({}, "sonnet", replay).lastMark.count, 0);
 });
 
@@ -176,4 +178,23 @@ test("the conversation survives its first prompt changing from a list to a strin
   assert.equal(next, state);
   assert.equal(next.currentTier, "opus");
   assert.equal(next.identityNote?.reason, "new-first-message");
+});
+
+// Claude Code follows a reply with a request that reuses the conversation and
+// ends in a fixed instruction. The next real prompt takes that message's place.
+test("a follow-up request ending in a different message does not lose the conversation", () => {
+  const store = createConversationStore();
+  const head = [
+    { role: "user", content: [{ type: "text", text: "start" }] },
+    { role: "assistant", content: [{ type: "text", text: "done" }] },
+  ];
+  const state = store.getOrInitState({}, "sonnet", [...head, { role: "user", content: "real prompt" }]);
+  updateState(state, "opus", USAGE, [...head, { role: "user", content: "real prompt" }]);
+  const fork = [...head, { role: "user", content: "fixed follow-up instruction" }];
+  assert.equal(store.getOrInitState({}, "sonnet", fork), state);
+  updateState(state, "opus", USAGE, fork);
+  const next = [...head, { role: "user", content: "second real prompt" }];
+  const again = store.getOrInitState({}, "sonnet", next);
+  assert.equal(again, state);
+  assert.equal(again.currentTier, "opus");
 });

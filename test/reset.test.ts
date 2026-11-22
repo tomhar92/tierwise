@@ -101,3 +101,30 @@ test("different text is still a reset, in either form", () => {
   assert.equal(detectReset(markMessages(a), [{ role: "user", content: [{ type: "text", text: "two" }] }]), true);
   assert.equal(detectReset(markMessages(a), [{ role: "assistant", content: "one" }]), true);
 });
+
+// A reset means the cache was lost. Replacing only the newest recorded message
+// loses nothing that was cached before it, so it is not one.
+test("replacing only the last recorded message is not a reset", () => {
+  const history = [
+    { role: "user", content: "task" },
+    { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }] },
+    { role: "user", content: "fixed follow-up instruction" },
+  ];
+  const next = [...history.slice(0, 2), { role: "user", content: "the real next prompt" }];
+  assert.equal(detectReset(markMessages(history), next), false);
+  assert.equal(detectReset(markMessages(history), [...next, { role: "assistant", content: "ok" }]), false);
+});
+
+test("replacing anything before the last recorded message is still a reset", () => {
+  const history = [
+    { role: "user", content: "task" },
+    { role: "assistant", content: "a" },
+    { role: "user", content: "b" },
+  ];
+  assert.equal(detectReset(markMessages(history), [{ role: "user", content: "other task" }, history[1], history[2]]), true);
+  assert.equal(detectReset(markMessages(history), [history[0], { role: "assistant", content: "changed" }, history[2]]), true);
+});
+
+test("a one-message history has no earlier prefix to keep, so changing it is a reset", () => {
+  assert.equal(detectReset(markMessages([{ role: "user", content: "a" }]), [{ role: "user", content: "b" }]), true);
+});

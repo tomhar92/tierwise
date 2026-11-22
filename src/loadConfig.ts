@@ -10,7 +10,12 @@ const skip = process.argv[2] === "config" || process.env.NODE_TEST_CONTEXT !== u
 
 if (!skip) {
   try {
-    applyConfig(process.env);
+    for (const key of applyConfig(process.env)) {
+      console.warn(
+        `tierwise: ${key} in the environment overrides a different value in the config file ` +
+          `(run \`unset ${key}\` to use the file's)`
+      );
+    }
   } catch (error) {
     if (!(error instanceof ConfigFileError)) throw error;
     console.error(`tierwise: ${error.message}`);
