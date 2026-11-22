@@ -494,6 +494,7 @@ export async function handleMessages(
 
   // Passing the request signal means a client disconnect cancels the
   // classification too, instead of leaving a billed request in flight.
+  let classifierFailure: string | undefined;
   const classification = skipped || manualSwitch
     ? null
     : await classify(
@@ -501,12 +502,12 @@ export async function handleMessages(
           recentMessages: sanitizeForClassifier(messages.slice(-6)),
           latestUserMessage,
         },
-        { signal }
+        { signal, onFailure: (reason) => (classifierFailure = reason) }
       );
   if (!classification && !skipped && !manualSwitch) {
     if (classifierOutage.failed()) {
       console.warn(
-        "tierwise: classifier unavailable (TypeSafe error or timeout) - holding the current tier until it recovers"
+        `tierwise: classifier unavailable (${classifierFailure ?? "no answer"}) - holding the current tier until it recovers`
       );
     }
   } else if (classification && classifierOutage.succeeded()) {

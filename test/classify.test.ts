@@ -94,3 +94,32 @@ test("carries the token usage the API reports, and omits it when the backend sen
   );
   assert.equal(without?.usage, undefined);
 });
+
+function clientRejecting(error: unknown) {
+  return { systemOne: (async () => { throw error; }) as never };
+}
+
+async function failureReason(error: unknown): Promise<string | undefined> {
+  let reason: string | undefined;
+  const result = await classifyTurn(
+    { recentMessages: [], latestUserMessage: "hi" },
+    { client: clientRejecting(error), onFailure: (r) => { reason = r; } }
+  );
+  assert.equal(result, null);
+  return reason;
+}
+
+test("a failed call says why, so a rejected key is not mistaken for a flaky API", async () => {
+  assert.equal(await failureReason(Object.assign(new Error("Unauthorized"), { status: 401 })), "key rejected (HTTP 401)");
+  assert.equal(await failureReason(Object.assign(new Error("Forbidden"), { status: 403 })), "key rejected (HTTP 403)");
+  assert.equal(await failureReason(Object.assign(new Error("slow down"), { status: 429 })), "rate limited (HTTP 429)");
+  assert.equal(await failureReason(Object.assign(new Error("oops"), { status: 503 })), "server error (HTTP 503)");
+  assert.equal(await failureReason(Object.assign(new Error("Request timed out"), { name: "APIConnectionTimeoutError" })), "timed out");
+  assert.match((await failureReason(Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND", hostname: "api.typesafe.ai" } })))!, /could not reach api\.typesafe\.ai/);
+  assert.equal(await failureReason(new RangeError("weird")), "unexpected RangeError");
+});
+
+test("the failure reason never includes the error message, which could carry request data", async () => {
+  const reason = await failureReason(new Error("sk-secret-value in the message"));
+  assert.doesNotMatch(String(reason), /secret/);
+});

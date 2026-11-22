@@ -126,3 +126,35 @@ test("a repeating classifier outage warns once and announces recovery", async ()
     warn.mock.restore();
   }
 });
+
+test("the outage warning says why the classifier failed", async () => {
+  const warn = mock.method(console, "warn", () => {});
+  const upstream = createServer((req, res) => {
+    req.resume();
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ type: "message", content: [], usage: { input_tokens: 1, output_tokens: 1 }, stop_reason: "end_turn" }));
+  });
+  const upstreamPort = await listen(upstream);
+  const ledgerPath = join(mkdtempSync(join(tmpdir(), "ledger-")), "l.jsonl");
+  const router = createProxyServer({
+    upstream: `http://127.0.0.1:${upstreamPort}`,
+    ledgerPath,
+    classify: async (_input, options) => {
+      options?.onFailure?.("key rejected (HTTP 401)");
+      return null;
+    },
+  });
+  const port = await listen(router);
+  try {
+    await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: messageBody,
+    }).then((r) => r.text());
+    assert.ok(warn.mock.calls.some((c) => /classifier unavailable \(key rejected \(HTTP 401\)\)/.test(String(c.arguments[0]))));
+  } finally {
+    router.close();
+    upstream.close();
+    warn.mock.restore();
+  }
+});

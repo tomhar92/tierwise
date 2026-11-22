@@ -1,4 +1,5 @@
 import { choice, TypeSafeClient, type JsonValue } from "@typesafe-ai/sdk";
+import { describeNetworkError } from "./networkError.js";
 import { TIER_ORDER, type ClassifyResult, type Tier } from "./types.js";
 
 let client: TypeSafeClient | undefined;
@@ -34,6 +35,23 @@ export interface ClassifyOptions {
   signal?: AbortSignal;
   /** Injection point for tests; defaults to the shared client. */
   client?: Pick<TypeSafeClient, "systemOne">;
+  /** Told why a call produced no answer. Never includes the error message,
+   * which could carry request data. */
+  onFailure?: (reason: string) => void;
+}
+
+/** A short, safe description of why the classifier call failed. */
+export function describeClassifierFailure(error: unknown): string {
+  const status = (error as { status?: unknown } | null)?.status;
+  if (status === 401 || status === 403) return `key rejected (HTTP ${status})`;
+  if (status === 429) return "rate limited (HTTP 429)";
+  if (typeof status === "number" && status >= 500) return `server error (HTTP ${status})`;
+  const name = error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : "";
+  if (/timeout|abort/i.test(name) || /timed out|timeout/i.test(message)) return "timed out";
+  const network = describeNetworkError(error);
+  if (network) return network;
+  return `unexpected ${name || "error"}`;
 }
 
 function hasEveryTier(probabilities: Record<string, number>): boolean {
@@ -79,7 +97,8 @@ export async function classifyTurn(
       probabilities: { ...answer.probabilities },
       ...(usage && { usage: { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens } }),
     };
-  } catch {
+  } catch (error) {
+    options.onFailure?.(describeClassifierFailure(error));
     return null;
   }
 }

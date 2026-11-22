@@ -85,6 +85,7 @@ export function markMessages(messages: unknown[]): MessageMark {
   return {
     count: messages.length,
     digest: digestPrefix(messages, messages.length),
+    prefixDigest: digestPrefix(messages, Math.max(messages.length - 1, 0)),
     digests: messages.map((message) => shortHash(message)),
     shapes: messages.map(shapeOf),
   };
@@ -109,12 +110,19 @@ export function diagnoseDivergence(last: MessageMark, currentMessages: unknown[]
   return undefined;
 }
 
-/** True unless `currentMessages` begins with exactly the messages that
- * `last` was taken from (ignoring cache_control placement). Only the mark is
- * kept between turns, not the messages, so a long-lived proxy does not hold
- * every tracked conversation's full history in memory. */
+/** True when the cache behind `last` is gone: `currentMessages` does not begin
+ * with the messages `last` was taken from (ignoring cache_control placement and
+ * the string-or-blocks form of a text). Replacing only the newest recorded
+ * message is not a loss - everything cached before it is intact - and happens
+ * routinely, because Claude Code follows a reply with a request that ends in a
+ * fixed instruction which the next real prompt then takes the place of. Only
+ * the mark is kept between turns, not the messages, so a long-lived proxy does
+ * not hold every tracked conversation's full history in memory. */
 export function detectReset(last: MessageMark | undefined, currentMessages: unknown[]): boolean {
   if (!last || last.count === 0) return true;
   if (currentMessages.length < last.count) return true;
-  return digestPrefix(currentMessages, last.count) !== last.digest;
+  if (digestPrefix(currentMessages, last.count) === last.digest) return false;
+  // A single message has no earlier prefix to keep.
+  if (last.count < 2 || last.prefixDigest === undefined) return true;
+  return digestPrefix(currentMessages, last.count - 1) !== last.prefixDigest;
 }

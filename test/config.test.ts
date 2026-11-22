@@ -140,3 +140,25 @@ test("a broken config stops the launcher with a clear message", () => {
   assert.equal(run.status, 1);
   assert.match(run.stderr, /not valid JSON/);
 });
+
+test("applying reports which stored values an environment variable overrode with a different one", () => {
+  const path = join(dir(), "config.json");
+  writeConfig(path, { TYPESAFE_API_KEY: "new-key", ROUTER_MAX_TIER: "opus", ROUTER_MIN_TIER: "haiku" });
+  const env: NodeJS.ProcessEnv = { TYPESAFE_API_KEY: "old-key", ROUTER_MAX_TIER: "opus" };
+  assert.deepEqual(applyConfig(env, path), ["TYPESAFE_API_KEY"]);
+  assert.equal(env.TYPESAFE_API_KEY, "old-key");
+  assert.equal(env.ROUTER_MIN_TIER, "haiku");
+});
+
+test("the launcher warns, without printing values, when the environment overrides the file", () => {
+  const path = join(dir(), "config.json");
+  writeConfig(path, { TYPESAFE_API_KEY: "file-key-value" });
+  const env: NodeJS.ProcessEnv = { ...process.env, TIERWISE_CONFIG: path, TYPESAFE_API_KEY: "env-key-value" };
+  delete env.NODE_TEST_CONTEXT;
+  const run = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", 'await import("./src/loadConfig.ts")'], {
+    env,
+    encoding: "utf8",
+  });
+  assert.match(run.stderr, /TYPESAFE_API_KEY.*environment.*overrides/);
+  assert.doesNotMatch(run.stderr, /env-key-value|file-key-value/);
+});
