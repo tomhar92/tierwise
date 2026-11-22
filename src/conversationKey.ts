@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ConversationState, IdentityNote, Tier } from "./types.js";
-import { detectReset, diagnoseDivergence, EMPTY_MARK, markMessages, stripCacheControl } from "./reset.js";
+import { canonicalMessage, detectReset, diagnoseDivergence, EMPTY_MARK, markMessages } from "./reset.js";
 
 const store = new WeakMap<object, ConversationState>();
 
@@ -27,7 +27,7 @@ const MAX_STATES_PER_FIRST_MESSAGE = 8;
 function fingerprint(messages: unknown[]): string | null {
   if (messages.length === 0) return null;
   return createHash("sha256")
-    .update(JSON.stringify(stripCacheControl(messages[0])))
+    .update(JSON.stringify(canonicalMessage(messages[0])))
     .digest("hex");
 }
 

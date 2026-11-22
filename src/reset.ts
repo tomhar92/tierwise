@@ -25,27 +25,53 @@ export function stripCacheControl(value: unknown): unknown {
   return value;
 }
 
+// Claude Code sends the same text two ways: the newest user prompt as a list of
+// text blocks (the form that can carry the cache marker), and once it is older
+// as a plain string. The API reads identical tokens either way, so the cache
+// still hits, but compared as JSON they differ - and the router took that for
+// a different conversation. Comparing in one canonical form (a list of blocks,
+// tool results likewise) removes the difference without hiding a real edit.
+function canonicalBlock(block: unknown): unknown {
+  if (block && typeof block === "object" && (block as { type?: unknown }).type === "tool_result") {
+    const { content } = block as { content?: unknown };
+    if (typeof content === "string") return { ...block, content: [{ type: "text", text: content }] };
+  }
+  return block;
+}
+
+export function canonicalMessage(message: unknown): unknown {
+  const stripped = stripCacheControl(message);
+  if (!stripped || typeof stripped !== "object") return stripped;
+  const { content } = stripped as { content?: unknown };
+  if (typeof content === "string") return { ...stripped, content: [{ type: "text", text: content }] };
+  if (Array.isArray(content)) return { ...stripped, content: content.map(canonicalBlock) };
+  return stripped;
+}
+
 // Hashing the first `count` messages, each framed by its length so two
 // different message lists can never concatenate to the same byte stream.
 function digestPrefix(messages: unknown[], count: number): string {
   const hash = createHash("sha256");
   for (let i = 0; i < count; i++) {
-    const text = JSON.stringify(stripCacheControl(messages[i])) ?? "null";
+    const text = JSON.stringify(canonicalMessage(messages[i])) ?? "null";
     hash.update(`${text.length}:`);
     hash.update(text);
   }
   return hash.digest("hex");
 }
 
-function shortHash(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(stripCacheControl(value)) ?? "null").digest("hex").slice(0, 4);
+function hash4(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value) ?? "null").digest("hex").slice(0, 4);
+}
+
+function shortHash(message: unknown): string {
+  return hash4(canonicalMessage(message));
 }
 
 function blockLabels(message: unknown): string[] {
-  const content = (message as { content?: unknown } | null)?.content;
-  if (typeof content === "string") return [`string#${shortHash(content)}`];
-  if (!Array.isArray(content)) return [`none#${shortHash(content)}`];
-  return content.map((block) => `${(block as { type?: unknown } | null)?.type ?? "?"}#${shortHash(block)}`);
+  const content = (canonicalMessage(message) as { content?: unknown } | null)?.content;
+  if (!Array.isArray(content)) return [`none#${hash4(content)}`];
+  return content.map((block) => `${(block as { type?: unknown } | null)?.type ?? "?"}#${hash4(block)}`);
 }
 
 function shapeOf(message: unknown): string {
