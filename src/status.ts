@@ -18,6 +18,8 @@ export interface StatusSnapshot {
   classifierTokens: number;
   /** The router's pending suggestion from the latest classified turn. */
   suggestedUpgradeTo: Tier | null;
+  /** What switching to it costs once; absent in a file written by an older version. */
+  suggestedUpgradeCostUsd?: number | null;
 }
 
 export const EMPTY_SNAPSHOT: StatusSnapshot = {
@@ -28,6 +30,7 @@ export const EMPTY_SNAPSHOT: StatusSnapshot = {
   classifierUsd: 0,
   classifierTokens: 0,
   suggestedUpgradeTo: null,
+  suggestedUpgradeCostUsd: null,
 };
 
 export function applyTurn(snapshot: StatusSnapshot, line: LedgerLine): StatusSnapshot {
@@ -44,7 +47,10 @@ export function applyTurn(snapshot: StatusSnapshot, line: LedgerLine): StatusSna
   if (line.actualTier) next.tier = line.actualTier;
   // Turns that were not classified (agentic loop steps) say nothing about
   // the suggestion, so it stays until a classified turn replaces it.
-  if (line.decision !== "skipped-tool-result") next.suggestedUpgradeTo = line.suggestedUpgradeTo;
+  if (line.decision !== "skipped-tool-result") {
+    next.suggestedUpgradeTo = line.suggestedUpgradeTo;
+    next.suggestedUpgradeCostUsd = line.suggestedUpgradeCostUsd;
+  }
   return next;
 }
 
@@ -74,7 +80,11 @@ export function formatStatusLine(snapshot: StatusSnapshot | null): string {
   }
   if (snapshot.classifierUsd > 0) parts.push(`classifier ${formatUsd(snapshot.classifierUsd)}`);
   else if (snapshot.classifierTokens > 0) parts.push(`classifier ${formatTokens(snapshot.classifierTokens)} tok`);
-  if (snapshot.suggestedUpgradeTo) parts.push(`↑ ${snapshot.suggestedUpgradeTo} suggested`);
+  if (snapshot.suggestedUpgradeTo) {
+    const to = snapshot.suggestedUpgradeTo;
+    const cost = snapshot.suggestedUpgradeCostUsd;
+    parts.push(`↑ ${to} suggested: /model ${to}` + (typeof cost === "number" ? ` (~$${cost.toFixed(2)} once)` : ""));
+  }
   return parts.join(" · ");
 }
 

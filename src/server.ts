@@ -654,6 +654,7 @@ export async function handleMessages(
       resetDetected:
         decision.kind === "downgraded-on-reset" || decision.kind === "upgraded-on-reset",
       ...takeIdentityNote(state),
+      ...(notice !== undefined && { note: noticeShown ? ("shown" as const) : ("held" as const) }),
       suggestedUpgradeTo: decision.kind === "upgrade-suggested" ? decision.to : null,
       suggestedUpgradeCostUsd:
         decision.kind === "upgrade-suggested" ? decision.estimatedCostUsd : null,
