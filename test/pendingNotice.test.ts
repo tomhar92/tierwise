@@ -5,6 +5,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProxyServer } from "../src/server.js";
+import { readLedger } from "../src/ledger.js";
 import { DEFAULT_PRICING } from "../src/pricing.js";
 import type { ClassifyResult } from "../src/types.js";
 
@@ -141,6 +142,26 @@ test("a manual /model change cancels a note that was still waiting", async () =>
   const afterSwitch = await post(DEFAULT_PRICING.modelAlias.haiku, [...turn, toolUse("t1"), toolResult("t1")]);
   assert.equal(afterSwitch.content.length, 1, "the user already chose; no note about a different choice");
 
+  router.close();
+  fake.close();
+});
+
+test("the ledger says whether a router note was held or actually shown", async () => {
+  const fake = await upstreamStopping(["end_turn", "tool_use", "end_turn", "end_turn"]);
+  const ledgerPath = join(mkdtempSync(join(tmpdir(), "ledger-")), "ledger.jsonl");
+  let call = 0;
+  const router = createProxyServer({ upstream: fake.url, ledgerPath, classify: async () => (++call === 2 ? opus() : sonnet()) });
+  const post = poster(await listen(router));
+  const sonnetModel = DEFAULT_PRICING.modelAlias.sonnet;
+  const settled = [{ role: "user", content: "start" }, { role: "assistant", content: "ok" }];
+  await post(sonnetModel, [settled[0]]);
+  const turn = [...settled, { role: "user", content: "a genuinely hard question" }];
+  await post(sonnetModel, turn);
+  const continuation = [...turn, toolUse("t1"), toolResult("t1")];
+  await post(sonnetModel, continuation);
+  await post(sonnetModel, [...continuation, { role: "assistant", content: "done" }, { role: "user", content: "thanks" }]);
+  const lines = readLedger(ledgerPath);
+  assert.deepEqual(lines.map((l) => l.note), [undefined, "held", "shown", undefined]);
   router.close();
   fake.close();
 });

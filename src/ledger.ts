@@ -26,6 +26,11 @@ export interface LedgerLine {
    * silently masquerade as normal routing. */
   decision: string;
   resetDetected: boolean;
+  /** Present when a router note was waiting for this request's reply: `held`
+   * if the reply could not carry it (it stopped to call a tool), `shown` if it
+   * was appended. Without this a note that never reached the user cannot be
+   * told apart from one that was never made. */
+  note?: "held" | "shown";
   /** Why this request started a new conversation although its first message
    * was already tracked. Present only on the first line of such a state. */
   identity?: IdentityNote;

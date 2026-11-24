@@ -50,7 +50,7 @@ test("the line shows tier, turns, savings and a pending suggestion", () => {
   snapshot = applyTurn(snapshot, line({ decision: "upgrade-suggested", suggestedUpgradeTo: "opus" }));
   assert.equal(
     formatStatusLine(snapshot),
-    "tierwise · sonnet · 2 turns · saved $0.20 (50%) · ↑ opus suggested"
+    "tierwise · sonnet · 2 turns · saved $0.20 (50%) · ↑ opus suggested: /model opus"
   );
 });
 
@@ -111,4 +111,22 @@ test("an unpriced classifier shows tokens, and a cost that outweighs the saving 
     line({ actualCostUsd: 0.2, counterfactualNoRoutingCostUsd: 0.2, classifierCostUsd: 0.05 })
   );
   assert.match(formatStatusLine(dear), /cost \+\$0\.05 \(25%\)/);
+});
+
+test("a pending suggestion says what to run and what switching costs once", () => {
+  const snapshot = applyTurn(
+    EMPTY_SNAPSHOT,
+    line({ decision: "upgrade-suggested", suggestedUpgradeTo: "opus", suggestedUpgradeCostUsd: 0.5123 })
+  );
+  assert.equal(snapshot.suggestedUpgradeCostUsd, 0.5123);
+  assert.match(formatStatusLine(snapshot), /↑ opus suggested: \/model opus \(~\$0\.51 once\)$/);
+  const cleared = applyTurn(snapshot, line({ decision: "held" }));
+  assert.equal(cleared.suggestedUpgradeCostUsd, null);
+  assert.doesNotMatch(formatStatusLine(cleared), /suggested/);
+});
+
+test("a snapshot file from an older version, with no suggestion cost, still formats", () => {
+  const old = { ...EMPTY_SNAPSHOT, turns: 1, tier: "sonnet" as const, suggestedUpgradeTo: "opus" as const } as Partial<typeof EMPTY_SNAPSHOT>;
+  delete old.suggestedUpgradeCostUsd;
+  assert.match(formatStatusLine(old as typeof EMPTY_SNAPSHOT), /↑ opus suggested: \/model opus$/);
 });
