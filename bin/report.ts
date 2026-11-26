@@ -8,6 +8,7 @@ export interface Summary {
   held: number;
   downgraded: number;
   upgradedOnReset: number;
+  upgraded: number;
   suggested: number;
   classifierUnavailable: number;
   skippedToolResult: number;
@@ -41,6 +42,7 @@ export function summarize(lines: LedgerLine[]): Summary {
       (l) => l.decision === "downgraded" || l.decision === "downgraded-on-reset"
     ).length,
     upgradedOnReset: lines.filter((l) => l.decision === "upgraded-on-reset").length,
+    upgraded: lines.filter((l) => l.decision === "upgraded").length,
     suggested: lines.filter((l) => l.decision === "upgrade-suggested").length,
     classifierUnavailable: lines.filter((l) => l.decision === "classifier-unavailable").length,
     skippedToolResult: lines.filter((l) => l.decision === "skipped-tool-result").length,
@@ -124,7 +126,7 @@ export function reportMain(argv: string[]): void {
   const s = summarize(lines);
   console.log(`Turns: ${s.turns}`);
   console.log(
-    `  held: ${s.held}, downgraded: ${s.downgraded}, upgraded-on-reset: ${s.upgradedOnReset}, upgrade-suggested: ${s.suggested}`
+    `  held: ${s.held}, downgraded: ${s.downgraded}, upgraded-on-reset: ${s.upgradedOnReset}, upgraded: ${s.upgraded}, upgrade-suggested: ${s.suggested}`
   );
   if (s.classifierUnavailable > 0) {
     console.log(

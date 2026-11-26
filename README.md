@@ -197,7 +197,8 @@ variable always overrides the file. `TIERWISE_CONFIG` moves the file.
 The file accepts `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`,
 `TYPESAFE_DEFAULT_MODEL`, `ROUTER_MARGIN_THRESHOLD`,
 `ROUTER_STICKY_ASSUMPTION`, `ROUTER_RESET_CONFIDENCE_FLOOR`,
-`ROUTER_MIN_TIER`, `ROUTER_MAX_TIER` and `ROUTER_LEDGER_PATH`.
+`ROUTER_MIN_TIER`, `ROUTER_MAX_TIER`, `ROUTER_UPGRADE_MODE`, `ROUTER_UPGRADE_CONFIDENCE`,
+`ROUTER_UPGRADE_MAX_COST_USD` and `ROUTER_LEDGER_PATH`.
 
 | Env var | Purpose | Default |
 | --- | --- | --- |
@@ -205,6 +206,9 @@ The file accepts `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`,
 | `TYPESAFE_BASE_URL` | Classifier API root; any `/v1/systemone`-compatible server | `https://api.typesafe.ai` |
 | `TYPESAFE_DEFAULT_MODEL` | Classifier model name sent to that server | `jev-latest` |
 | `TYPESAFE_PRICE_IN_PER_MTOK` / `TYPESAFE_PRICE_OUT_PER_MTOK` | USD per million classifier input / output tokens, used to price the classifier's own cost | `0.042` / `0` on the hosted API (typesafe.ai lists $42 per billion input tokens, no output price); `0` on a self-hosted `TYPESAFE_BASE_URL` |
+| `ROUTER_UPGRADE_MODE` | `auto` runs a mid-session upgrade on the turn that needs it when the classifier is very sure; `suggest` only offers it after the reply | `auto` |
+| `ROUTER_UPGRADE_CONFIDENCE` | Classifier confidence an automatic upgrade needs (0-1) | `0.9` |
+| `ROUTER_UPGRADE_MAX_COST_USD` | An upgrade whose one-time cache rebuild costs more than this stays a suggestion | `1` |
 | `ROUTER_LEDGER_PATH` | Where turn-by-turn cost data is logged | `./router-ledger.jsonl` |
 | `PORT` | Local proxy port | `8787` |
 | `HOST` | Interface the proxy binds to | `127.0.0.1` |

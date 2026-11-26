@@ -27,3 +27,13 @@ export function buildResetUpgradeNoticeText(to: Tier, from: Tier): string {
     `Run \`/model ${from}\` to switch back.*`
   );
 }
+
+/** An upgrade applied to the turn that just ran: it was decided on this very
+ * request, so the reply the user is reading came from the higher tier. */
+export function buildAutoUpgradeNoticeText(to: Tier, from: Tier, estimatedCostUsd: number): string {
+  return (
+    `\n\n---\n${NOTICE_MARKER} this turn ran on ${to} instead of ${from}, ` +
+    `because the request looked like it needed it. Moving the conversation rebuilt the cache, ` +
+    `about $${estimatedCostUsd.toFixed(2)} one time. Run \`/model ${from}\` to switch back.*`
+  );
+}

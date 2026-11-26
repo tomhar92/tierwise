@@ -86,4 +86,7 @@ export type Decision =
   | { kind: "downgraded"; to: Tier; breakEvenTurns: number }
   | { kind: "downgraded-on-reset"; to: Tier }
   | { kind: "upgraded-on-reset"; to: Tier }
-  | { kind: "upgrade-suggested"; to: Tier; estimatedCostUsd: number };
+  | { kind: "upgrade-suggested"; to: Tier; estimatedCostUsd: number }
+  /** A mid-session upgrade applied to this turn: the classifier was sure
+   * enough, and the cache rebuild cheap enough, not to wait for the user. */
+  | { kind: "upgraded"; to: Tier; estimatedCostUsd: number };

@@ -295,6 +295,9 @@ test("a conversation that moves to a new connection is not mistaken for a reset"
   const router = createProxyServer({
     upstream: fake.url,
     ledgerPath,
+    // About identity, not upgrade policy: the offer-only mode keeps the second
+    // turn a suggestion, which is what a wrongly-detected reset used to skip.
+    limits: { ...DEFAULT_LIMITS, upgradeMode: "suggest" },
     classify: async () => {
       calls += 1;
       return calls === 1

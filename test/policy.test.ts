@@ -239,6 +239,9 @@ const LIMITS = {
   minTier: "haiku" as const,
   maxTier: "fable" as const,
   resetConfidenceFloor: 0.5,
+  upgradeMode: "auto" as const,
+  upgradeConfidence: 0.9,
+  upgradeMaxCostUsd: 1,
 };
 
 test("a reset holds when the classifier is not confident enough to spend on a switch", () => {
@@ -279,4 +282,81 @@ test("ROUTER_MAX_TIER keeps fable out of the non-reset upgrade candidates", () =
     maxTier: "opus",
   });
   assert.equal(decision.kind, "held");
+});
+
+// A mid-session upgrade is decided for the turn that just arrived, so a
+// suggestion shown after the reply helps nothing for it. When the classifier is
+// very sure, the turn runs on the higher tier and the user is told.
+const hardTurn = (confidence: number): ClassifyResult => ({
+  choice: "opus",
+  confidence,
+  probabilities: { haiku: 0.0, sonnet: 1 - confidence, opus: confidence, fable: 0 },
+});
+const sameHistory = [{ role: "user", content: "a" }, { role: "assistant", content: "b" }];
+const midSession = (overrides: Partial<ConversationState> = {}) =>
+  state({ currentTier: "sonnet", lastMark: markMessages(sameHistory), ...overrides });
+
+test("DEFAULT_LIMITS upgrade settings default to auto at 0.9 with a $1 rebuild cap, and read the environment", () => {
+  const defaults = readThresholds().DEFAULT_LIMITS;
+  assert.equal(defaults.upgradeMode, "auto");
+  assert.equal(defaults.upgradeConfidence, 0.9);
+  assert.equal(defaults.upgradeMaxCostUsd, 1);
+  const set = readThresholds({
+    ROUTER_UPGRADE_MODE: "suggest",
+    ROUTER_UPGRADE_CONFIDENCE: "0.95",
+    ROUTER_UPGRADE_MAX_COST_USD: "0.25",
+  }).DEFAULT_LIMITS;
+  assert.equal(set.upgradeMode, "suggest");
+  assert.equal(set.upgradeConfidence, 0.95);
+  assert.equal(set.upgradeMaxCostUsd, 0.25);
+  assert.equal(readThresholds({ ROUTER_UPGRADE_MODE: "bogus" }).DEFAULT_LIMITS.upgradeMode, "auto");
+});
+
+test("a mid-session upgrade the classifier is very sure about runs this turn on the higher tier", () => {
+  const decision = decide(hardTurn(0.93), midSession(), sameHistory, DEFAULT_PRICING, DEFAULT_LIMITS);
+  assert.equal(decision.kind, "upgraded");
+  if (decision.kind === "upgraded") {
+    assert.equal(decision.to, "opus");
+    assert.ok(decision.estimatedCostUsd > 0);
+  }
+});
+
+test("below the confidence threshold it is still only a suggestion", () => {
+  const decision = decide(hardTurn(0.85), midSession(), sameHistory, DEFAULT_PRICING, DEFAULT_LIMITS);
+  assert.equal(decision.kind, "upgrade-suggested");
+});
+
+test("the confidence threshold is configurable", () => {
+  const lenient = { ...DEFAULT_LIMITS, upgradeConfidence: 0.8 };
+  assert.equal(decide(hardTurn(0.85), midSession(), sameHistory, DEFAULT_PRICING, lenient).kind, "upgraded");
+  const strict = { ...DEFAULT_LIMITS, upgradeConfidence: 0.99 };
+  assert.equal(decide(hardTurn(0.93), midSession(), sameHistory, DEFAULT_PRICING, strict).kind, "upgrade-suggested");
+});
+
+test("suggest mode never upgrades on its own, however sure the classifier is", () => {
+  const decision = decide(hardTurn(0.99), midSession(), sameHistory, DEFAULT_PRICING, { ...DEFAULT_LIMITS, upgradeMode: "suggest" });
+  assert.equal(decision.kind, "upgrade-suggested");
+});
+
+test("an upgrade whose cache rebuild costs more than the cap stays a suggestion", () => {
+  const big = midSession({ lastPrefixTokens: 400_000 });
+  const capped = decide(hardTurn(0.95), big, sameHistory, DEFAULT_PRICING, { ...DEFAULT_LIMITS, upgradeMaxCostUsd: 1 });
+  assert.equal(capped.kind, "upgrade-suggested");
+  const uncapped = decide(hardTurn(0.95), big, sameHistory, DEFAULT_PRICING, { ...DEFAULT_LIMITS, upgradeMaxCostUsd: 100 });
+  assert.equal(uncapped.kind, "upgraded");
+});
+
+test("a conversation the user pinned with /model is only ever offered the upgrade", () => {
+  const decision = decide(hardTurn(0.97), midSession({ pinnedByUser: true }), sameHistory, DEFAULT_PRICING, DEFAULT_LIMITS);
+  assert.equal(decision.kind, "upgrade-suggested");
+});
+
+test("an auto upgrade never goes above ROUTER_MAX_TIER", () => {
+  const fableTurn: ClassifyResult = {
+    choice: "fable",
+    confidence: 0.95,
+    probabilities: { haiku: 0, sonnet: 0.02, opus: 0.03, fable: 0.95 },
+  };
+  const decision = decide(fableTurn, midSession(), sameHistory, DEFAULT_PRICING, { ...DEFAULT_LIMITS, maxTier: "opus" });
+  assert.notEqual(decision.kind === "upgraded" && decision.to, "fable");
 });

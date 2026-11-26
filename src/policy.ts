@@ -21,12 +21,26 @@ export function envTier(name: string, fallback: Tier): Tier {
   return (TIER_ORDER as readonly string[]).includes(raw) ? (raw as Tier) : fallback;
 }
 
+export type UpgradeMode = "auto" | "suggest";
+
+export function envChoice<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
+  const raw = process.env[name]?.trim().toLowerCase();
+  return raw && (allowed as readonly string[]).includes(raw) ? (raw as T) : fallback;
+}
+
 export interface PolicyLimits {
   marginThreshold: number;
   stickyAssumption: number;
   minTier: Tier;
   maxTier: Tier;
   resetConfidenceFloor: number;
+  /** `auto` runs a mid-session upgrade on this turn when the classifier is sure
+   * enough; `suggest` only ever offers it after the reply. */
+  upgradeMode: UpgradeMode;
+  /** The classifier confidence an automatic upgrade needs. */
+  upgradeConfidence: number;
+  /** An upgrade whose one-time cache rebuild costs more than this stays a suggestion. */
+  upgradeMaxCostUsd: number;
 }
 
 export const MARGIN_THRESHOLD = envNumber("ROUTER_MARGIN_THRESHOLD", 0.1);
@@ -38,6 +52,9 @@ export const DEFAULT_LIMITS: PolicyLimits = {
   minTier: envTier("ROUTER_MIN_TIER", "haiku"),
   maxTier: envTier("ROUTER_MAX_TIER", "fable"),
   resetConfidenceFloor: envNumber("ROUTER_RESET_CONFIDENCE_FLOOR", 0.5),
+  upgradeMode: envChoice("ROUTER_UPGRADE_MODE", ["auto", "suggest"] as const, "auto"),
+  upgradeConfidence: envNumber("ROUTER_UPGRADE_CONFIDENCE", 0.9),
+  upgradeMaxCostUsd: envNumber("ROUTER_UPGRADE_MAX_COST_USD", 1),
 };
 
 function clampTier(tier: Tier, limits: PolicyLimits): Tier {
@@ -114,5 +131,17 @@ export function decide(
     upgradeCandidate!,
     pricing
   );
+  // The turn that triggered this is the one that needs the better model; a
+  // suggestion shown after its reply cannot help it. So when the classifier is
+  // very sure and the rebuild is cheap, the turn runs upgraded. A pinned model
+  // is the user's own choice, and is only ever offered the upgrade.
+  if (
+    limits.upgradeMode === "auto" &&
+    !state.pinnedByUser &&
+    classification.confidence >= limits.upgradeConfidence &&
+    estimatedCostUsd <= limits.upgradeMaxCostUsd
+  ) {
+    return { kind: "upgraded", to: upgradeCandidate!, estimatedCostUsd };
+  }
   return { kind: "upgrade-suggested", to: upgradeCandidate!, estimatedCostUsd };
 }

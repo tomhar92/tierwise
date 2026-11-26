@@ -7,7 +7,7 @@ import { TIER_ORDER } from "./types.js";
 // file and an `export` mean the same thing and the docs need no second
 // vocabulary. The file only fills in what the environment leaves unset.
 
-type Kind = "secret" | "number" | "tier" | "url" | "string";
+type Kind = "secret" | "number" | "tier" | "url" | "string" | "upgrade-mode" | "confidence" | "usd";
 
 export const SETTINGS: Record<string, { kind: Kind; help: string }> = {
   TYPESAFE_API_KEY: { kind: "secret", help: "API key for the hosted classifier" },
@@ -18,6 +18,9 @@ export const SETTINGS: Record<string, { kind: Kind; help: string }> = {
   ROUTER_RESET_CONFIDENCE_FLOOR: { kind: "number", help: "min confidence to switch on a reset" },
   ROUTER_MIN_TIER: { kind: "tier", help: "lowest tier the router may pick" },
   ROUTER_MAX_TIER: { kind: "tier", help: "highest tier the router may pick" },
+  ROUTER_UPGRADE_MODE: { kind: "upgrade-mode", help: "auto: run a very sure upgrade on this turn; suggest: only offer it" },
+  ROUTER_UPGRADE_CONFIDENCE: { kind: "confidence", help: "classifier confidence an automatic upgrade needs (0-1, default 0.9)" },
+  ROUTER_UPGRADE_MAX_COST_USD: { kind: "usd", help: "an upgrade costing more to rebuild than this stays a suggestion (default 1)" },
   ROUTER_LEDGER_PATH: { kind: "string", help: "where turn-by-turn cost data is logged" },
 };
 
@@ -34,6 +37,15 @@ export function validateSetting(key: string, value: string): string | null {
   if (setting.kind === "number" && !Number.isFinite(Number(trimmed))) return `${key} must be a number, got "${value}"`;
   if (setting.kind === "tier" && !(TIER_ORDER as readonly string[]).includes(trimmed.toLowerCase())) {
     return `${key} must be one of ${TIER_ORDER.join(", ")}, got "${value}"`;
+  }
+  if (setting.kind === "upgrade-mode" && !["auto", "suggest"].includes(trimmed.toLowerCase())) {
+    return `${key} must be auto or suggest, got "${value}"`;
+  }
+  if (setting.kind === "confidence" && !(Number.isFinite(Number(trimmed)) && Number(trimmed) >= 0 && Number(trimmed) <= 1)) {
+    return `${key} must be a number from 0 to 1, got "${value}"`;
+  }
+  if (setting.kind === "usd" && !(Number.isFinite(Number(trimmed)) && Number(trimmed) >= 0)) {
+    return `${key} must be a dollar amount of 0 or more, got "${value}"`;
   }
   if (setting.kind === "url") {
     try {

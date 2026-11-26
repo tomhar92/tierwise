@@ -165,3 +165,50 @@ test("the ledger says whether a router note was held or actually shown", async (
   router.close();
   fake.close();
 });
+
+test("a very sure mid-session upgrade runs this turn on the higher tier and says so", async () => {
+  const fake = await upstreamStopping(["end_turn"]);
+  const ledgerPath = join(mkdtempSync(join(tmpdir(), "ledger-")), "ledger.jsonl");
+  let call = 0;
+  const veryHard = (): ClassifyResult => ({
+    choice: "opus",
+    confidence: 0.95,
+    probabilities: { haiku: 0.0, sonnet: 0.04, opus: 0.95, fable: 0.01 },
+  });
+  const router = createProxyServer({ upstream: fake.url, ledgerPath, classify: async () => (++call === 1 ? sonnet() : veryHard()) });
+  const post = poster(await listen(router));
+  const sonnetModel = DEFAULT_PRICING.modelAlias.sonnet;
+  const start = [{ role: "user", content: "start" }, { role: "assistant", content: "ok" }];
+  await post(sonnetModel, [start[0]]);
+  fake.models.length = 0;
+  const reply = await post(sonnetModel, [...start, { role: "user", content: "a genuinely hard question" }]);
+  assert.equal(fake.models[0], DEFAULT_PRICING.modelAlias.opus, "this very turn ran on opus");
+  assert.match(reply.content[1].text, /ran on opus instead of sonnet/);
+  assert.match(reply.content[1].text, /\/model sonnet/);
+  const lines = readLedger(ledgerPath);
+  assert.equal(lines[1].decision, "upgraded");
+  assert.equal(lines[1].actualTier, "opus");
+  assert.equal(lines[1].note, "shown");
+  router.close();
+  fake.close();
+});
+
+test("below the threshold the same turn stays on its tier and only suggests", async () => {
+  const fake = await upstreamStopping(["end_turn"]);
+  let call = 0;
+  const router = createProxyServer({
+    upstream: fake.url,
+    ledgerPath: join(mkdtempSync(join(tmpdir(), "ledger-")), "ledger.jsonl"),
+    classify: async () => (++call === 1 ? sonnet() : opus()),
+  });
+  const post = poster(await listen(router));
+  const sonnetModel = DEFAULT_PRICING.modelAlias.sonnet;
+  const start = [{ role: "user", content: "start" }, { role: "assistant", content: "ok" }];
+  await post(sonnetModel, [start[0]]);
+  fake.models.length = 0;
+  const reply = await post(sonnetModel, [...start, { role: "user", content: "a hard question" }]);
+  assert.equal(fake.models[0], sonnetModel, "0.7 confidence is below the 0.9 threshold");
+  assert.match(reply.content[1].text, /Run `\/model opus`/);
+  router.close();
+  fake.close();
+});

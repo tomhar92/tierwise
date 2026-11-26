@@ -15,7 +15,7 @@ import {
   isToolResultContinuation,
   sanitizeForClassifier,
 } from "./classifyInput.js";
-import { buildResetUpgradeNoticeText, buildUpgradeNoticeText } from "./upgradeNote.js";
+import { buildAutoUpgradeNoticeText, buildResetUpgradeNoticeText, buildUpgradeNoticeText } from "./upgradeNote.js";
 import { SseNoteInjector, injectNoteIntoJsonResult } from "./responseNote.js";
 import { UsageAccumulator, type UsageTotals } from "./usage.js";
 import { isMainModule } from "./isMainModule.js";
@@ -528,9 +528,10 @@ export async function handleMessages(
   const isSwitch =
     decision.kind === "downgraded" ||
     decision.kind === "downgraded-on-reset" ||
-    decision.kind === "upgraded-on-reset";
+    decision.kind === "upgraded-on-reset" ||
+    decision.kind === "upgraded";
 
-  // A "held" (or upgrade-suggested, which never auto-switches) decision
+  // A "held" (or upgrade-suggested, which leaves the switch to the user) decision
   // means: stay on the tier the router already put this conversation on,
   // not "revert to whatever Claude Code's own request happens to say" -
   // Claude Code keeps resending its own default every turn, so falling
@@ -572,7 +573,9 @@ export async function handleMessages(
         ? buildUpgradeNoticeText(decision.to, decision.estimatedCostUsd)
         : decision.kind === "upgraded-on-reset" && decision.to !== requestedTier
           ? buildResetUpgradeNoticeText(decision.to, requestedTier)
-          : undefined;
+          : decision.kind === "upgraded"
+            ? buildAutoUpgradeNoticeText(decision.to, requestedTier, decision.estimatedCostUsd)
+            : undefined;
   }
   const notice = state.pendingNotice;
 
