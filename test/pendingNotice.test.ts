@@ -344,3 +344,30 @@ test("the no-router baseline of an auto upgrade does not pay for the router's ow
   router.close();
   upstream.close();
 });
+
+test("after /model changes the model, the switch is recorded and the choice pinned", async () => {
+  const h = await upgradeHarness(["end_turn"], [sonnet, veryHard]);
+  const { sonnet: sonnetModel, haiku: haikuModel } = DEFAULT_PRICING.modelAlias;
+  const call = { type: "tool_use", id: "t1", name: "Read", input: {} };
+  const thought = { type: "thinking", thinking: "hmm", signature: "s" };
+  await h.post(sonnetModel, [startHistory[0]]);
+  const before = [...startHistory, hardPrompt, { role: "assistant", content: [thought, call] }, toolResult("t1")];
+  await h.post(sonnetModel, before.slice(0, 3));
+  await h.post(sonnetModel, before);
+  const switched = [
+    ...before.slice(0, 3),
+    { role: "assistant", content: [call] },
+    toolResult("t1"),
+    { role: "assistant", content: "done" },
+    { ...modelCommand },
+    { role: "user", content: "again" },
+  ];
+  await h.post(haikuModel, switched);
+  await h.post(haikuModel, [...switched, { role: "assistant", content: "ok" }, { role: "user", content: "another hard one" }]);
+  const lines = readLedger(h.ledgerPath);
+  assert.equal(lines[3].decision, "manual-switch");
+  assert.equal(lines[3].conversationKey, lines[0].conversationKey);
+  assert.equal(lines[4].decision, "upgrade-suggested", "the user's choice is pinned");
+  assert.equal(h.fake.models[4], haikuModel);
+  h.close();
+});

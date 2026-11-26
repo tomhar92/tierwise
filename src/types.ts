@@ -28,6 +28,8 @@ export interface MessageMark {
   /** Digest of all but the last message, which a later request may replace
    * without losing anything cached before it. */
   prefixDigest?: string;
+  /** How many `/model` commands the history held, so a new one can be told apart. */
+  modelCommands?: number;
   /** One hash per message, so a later mismatch can say which message moved. */
   digests?: string[];
   /** One shape per message (role and block types with short content hashes). */

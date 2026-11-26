@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ConversationState, IdentityNote, Tier } from "./types.js";
-import { canonicalMessage, detectReset, diagnoseDivergence, EMPTY_MARK, markMessages } from "./reset.js";
+import { canonicalMessage, detectReset, diagnoseDivergence, EMPTY_MARK, markMessages, ranModelCommandSince } from "./reset.js";
 
 const store = new WeakMap<object, ConversationState>();
 
@@ -83,6 +83,15 @@ export function createConversationStore(): ConversationStore {
             remember(candidate, key);
             return candidate;
           }
+        }
+      }
+      // Changing model can reshape earlier messages for the new one. A `/model`
+      // run since the last request says this is that conversation, switched.
+      if (key !== null) {
+        const newest = (byFingerprint.get(key) ?? []).at(-1);
+        if (newest && ranModelCommandSince(newest.lastMark, messages)) {
+          remember(newest, key);
+          return newest;
         }
       }
       let identityNote: IdentityNote | undefined;
