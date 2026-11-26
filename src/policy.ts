@@ -1,7 +1,8 @@
 import { TIER_ORDER, type ClassifyResult, type ConversationState, type Decision, type PricingConfig, type Tier } from "./types.js";
 import { detectReset } from "./reset.js";
 import { computeMargins } from "./margins.js";
-import { breakEvenTurns, switchTax } from "./breakEven.js";
+import { breakEvenTurns, rebuildCost } from "./breakEven.js";
+import { invalidUpgradeSettings } from "./config.js";
 
 export function envNumber(name: string, fallback: number): number {
   // Trimmed and checked for emptiness *before* Number(): Number(" ") is 0,
@@ -52,7 +53,10 @@ export const DEFAULT_LIMITS: PolicyLimits = {
   minTier: envTier("ROUTER_MIN_TIER", "haiku"),
   maxTier: envTier("ROUTER_MAX_TIER", "fable"),
   resetConfidenceFloor: envNumber("ROUTER_RESET_CONFIDENCE_FLOOR", 0.5),
-  upgradeMode: envChoice("ROUTER_UPGRADE_MODE", ["auto", "suggest"] as const, "auto"),
+  // A setting that cannot be read as written must not spend money on a guess.
+  upgradeMode: invalidUpgradeSettings(process.env).length
+    ? "suggest"
+    : envChoice("ROUTER_UPGRADE_MODE", ["auto", "suggest"] as const, "auto"),
   upgradeConfidence: envNumber("ROUTER_UPGRADE_CONFIDENCE", 0.9),
   upgradeMaxCostUsd: envNumber("ROUTER_UPGRADE_MAX_COST_USD", 1),
 };
@@ -123,10 +127,9 @@ export function decide(
     return { kind: "held" };
   }
 
-  const estimatedCostUsd = switchTax(
-    state.lastPrefixTokens,
-    state.lastNewTokens,
-    state.lastOutputTokens,
+  // The last turn's input and reply are part of the history by now.
+  const estimatedCostUsd = rebuildCost(
+    state.lastPrefixTokens + state.lastNewTokens + state.lastOutputTokens,
     state.currentTier,
     upgradeCandidate!,
     pricing

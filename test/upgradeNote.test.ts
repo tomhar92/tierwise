@@ -17,7 +17,7 @@ test("an upgrade the router applied to this turn says where it ran, what it cost
   const { buildAutoUpgradeNoticeText } = await import("../src/upgradeNote.js");
   const text = buildAutoUpgradeNoticeText("opus", "haiku", 0.2836);
   assert.match(text, /^\n\n---\n\*Router note:/);
-  assert.match(text, /ran on opus/);
+  assert.match(text, /moved this conversation to opus from haiku/);
   assert.match(text, /\$0\.28/);
   assert.match(text, /\/model haiku/);
   const { isRouterNote } = await import("../src/upgradeNote.js");

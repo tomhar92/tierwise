@@ -1062,8 +1062,8 @@ test("an unknown-model turn does not make the next resolvable-model turn look li
     // A strong opus signal: if turn 2 is (wrongly) treated as a reset, decide()
     // takes the reset branch and immediately returns "upgraded-on-reset" for
     // any choice !== state.currentTier. If turn 2 is correctly recognized as a
-    // continuation, decide() instead runs the margin path, which never
-    // auto-switches upward - it can only produce "upgrade-suggested" or "held".
+    // continuation, decide() instead runs the margin path, which can upgrade
+    // but never reports it as a reset.
     classify: async () => ({
       choice: "opus",
       confidence: 0.95,

@@ -57,6 +57,18 @@ export function validateSetting(key: string, value: string): string | null {
   return null;
 }
 
+const UPGRADE_SETTINGS = ["ROUTER_UPGRADE_MODE", "ROUTER_UPGRADE_CONFIDENCE", "ROUTER_UPGRADE_MAX_COST_USD"];
+
+/** Why each upgrade setting that is set cannot be used. The environment and a
+ * hand-edited file never pass through `config set`, so they are checked here. */
+export function invalidUpgradeSettings(env: NodeJS.ProcessEnv): string[] {
+  return UPGRADE_SETTINGS.flatMap((key) => {
+    const value = env[key]?.trim();
+    const problem = value ? validateSetting(key, value) : null;
+    return problem ? [problem] : [];
+  });
+}
+
 export class ConfigFileError extends Error {}
 
 /** The stored values. A missing file is empty; a file that exists but cannot be

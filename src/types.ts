@@ -76,6 +76,9 @@ export interface ConversationState {
    * to call a tool, and the rest of the loop is never classified, so the
    * note is held here until a reply ends normally. */
   pendingNotice?: string;
+  /** The waiting note reports a switch the router already made, so a later
+   * turn that leaves the model alone must not erase it. */
+  pendingNoticeApplied?: boolean;
   /** Set when this state was created because a request with a known first
    * message did not continue any tracked conversation. Logged once. */
   identityNote?: IdentityNote;

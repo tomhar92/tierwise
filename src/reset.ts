@@ -126,3 +126,11 @@ export function detectReset(last: MessageMark | undefined, currentMessages: unkn
   if (last.count < 2 || last.prefixDigest === undefined) return true;
   return digestPrefix(currentMessages, last.count - 1) !== last.prefixDigest;
 }
+
+/** The messages a request adds to what `last` recorded, including the newest
+ * recorded one if something else has taken its place. */
+export function newMessagesSince(last: MessageMark, currentMessages: unknown[]): unknown[] {
+  return currentMessages.filter(
+    (message, i) => i >= last.count || (i === last.count - 1 && shortHash(message) !== last.digests?.[i])
+  );
+}

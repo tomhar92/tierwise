@@ -183,7 +183,7 @@ test("a very sure mid-session upgrade runs this turn on the higher tier and says
   fake.models.length = 0;
   const reply = await post(sonnetModel, [...start, { role: "user", content: "a genuinely hard question" }]);
   assert.equal(fake.models[0], DEFAULT_PRICING.modelAlias.opus, "this very turn ran on opus");
-  assert.match(reply.content[1].text, /ran on opus instead of sonnet/);
+  assert.match(reply.content[1].text, /to opus from sonnet/);
   assert.match(reply.content[1].text, /\/model sonnet/);
   const lines = readLedger(ledgerPath);
   assert.equal(lines[1].decision, "upgraded");
@@ -211,4 +211,136 @@ test("below the threshold the same turn stays on its tier and only suggests", as
   assert.match(reply.content[1].text, /Run `\/model opus`/);
   router.close();
   fake.close();
+});
+
+const veryHard = (): ClassifyResult => ({
+  choice: "opus",
+  confidence: 0.95,
+  probabilities: { haiku: 0.0, sonnet: 0.04, opus: 0.95, fable: 0.01 },
+});
+const modelCommand = {
+  role: "user",
+  content: "<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>sonnet</command-args>",
+};
+const startHistory = [{ role: "user", content: "start" }, { role: "assistant", content: "ok" }];
+const hardPrompt = { role: "user", content: "a genuinely hard question" };
+
+async function upgradeHarness(reasons: string[], classifications: Array<(() => ClassifyResult) | null>) {
+  const fake = await upstreamStopping(reasons);
+  const ledgerPath = join(mkdtempSync(join(tmpdir(), "ledger-")), "ledger.jsonl");
+  let call = 0;
+  const router = createProxyServer({
+    upstream: fake.url,
+    ledgerPath,
+    classify: async () => {
+      const next = classifications[Math.min(call++, classifications.length - 1)];
+      return next ? next() : null;
+    },
+  });
+  const post = poster(await listen(router));
+  return { fake, ledgerPath, post, close: () => { router.close(); fake.close(); } };
+}
+
+test("running /model for the model Claude Code already asks for takes the conversation back and pins it", async () => {
+  const h = await upgradeHarness(["end_turn"], [sonnet, veryHard]);
+  const { sonnet: sonnetModel, opus: opusModel } = DEFAULT_PRICING.modelAlias;
+  await h.post(sonnetModel, [startHistory[0]]);
+  const upgraded = [...startHistory, hardPrompt];
+  await h.post(sonnetModel, upgraded);
+  const back = [...upgraded, { role: "assistant", content: "done" }, modelCommand, { role: "user", content: "again" }];
+  await h.post(sonnetModel, back);
+  await h.post(sonnetModel, [...back, { role: "assistant", content: "ok" }, { role: "user", content: "another hard one" }]);
+  assert.deepEqual(h.fake.models.slice(1), [opusModel, sonnetModel, sonnetModel]);
+  const lines = readLedger(h.ledgerPath);
+  assert.equal(lines[2].decision, "manual-switch");
+  assert.equal(lines[3].decision, "upgrade-suggested", "the old command does not count twice, and the pin holds");
+  h.close();
+});
+
+// 2
+test("the note names the tier the conversation was on, not the one Claude Code asks for", async () => {
+  const haiku = (): ClassifyResult => ({
+    choice: "haiku",
+    confidence: 0.99,
+    probabilities: { haiku: 0.99, sonnet: 0.01, opus: 0, fable: 0 },
+  });
+  const h = await upgradeHarness(["end_turn"], [haiku, veryHard]);
+  const sonnetModel = DEFAULT_PRICING.modelAlias.sonnet;
+  await h.post(sonnetModel, [startHistory[0]]);
+  const reply = await h.post(sonnetModel, [...startHistory, hardPrompt]);
+  assert.match(reply.content[1].text, /to opus from haiku/);
+  assert.match(reply.content[1].text, /\/model haiku/);
+  h.close();
+});
+
+// 4
+test("a later held turn does not erase an undelivered note about an applied upgrade", async () => {
+  const h = await upgradeHarness(["end_turn", "tool_use", "end_turn"], [sonnet, veryHard, opus]);
+  const sonnetModel = DEFAULT_PRICING.modelAlias.sonnet;
+  await h.post(sonnetModel, [startHistory[0]]);
+  await h.post(sonnetModel, [...startHistory, hardPrompt]);
+  const reply = await h.post(sonnetModel, [...startHistory, hardPrompt, { role: "assistant", content: "stopped" }, { role: "user", content: "go on" }]);
+  assert.equal(readLedger(h.ledgerPath)[2].decision, "held");
+  assert.match(reply.content[1].text, /to opus from sonnet/);
+  h.close();
+});
+
+// 7
+test("an upgrade that failed upstream leaves no note behind", async () => {
+  let call = 0;
+  const upstream = createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      const failed = ++call === 2;
+      res.writeHead(failed ? 529 : 200, { "content-type": "application/json" });
+      res.end(JSON.stringify(failed
+        ? { type: "error", error: { type: "overloaded_error", message: "busy" } }
+        : { type: "message", content: [{ type: "text", text: "reply" }], stop_reason: "end_turn", usage: USAGE }));
+    });
+  });
+  const upstreamPort = await listen(upstream);
+  let classified = 0;
+  const router = createProxyServer({
+    upstream: `http://127.0.0.1:${upstreamPort}`,
+    ledgerPath: join(mkdtempSync(join(tmpdir(), "ledger-")), "ledger.jsonl"),
+    classify: async () => (++classified === 1 ? sonnet() : classified === 2 ? veryHard() : null),
+  });
+  const post = poster(await listen(router));
+  const sonnetModel = DEFAULT_PRICING.modelAlias.sonnet;
+  await post(sonnetModel, [startHistory[0]]);
+  await post(sonnetModel, [...startHistory, hardPrompt]);
+  const retry = await post(sonnetModel, [...startHistory, hardPrompt]);
+  assert.equal(retry.content.length, 1);
+  router.close();
+  upstream.close();
+});
+
+// 3
+test("the no-router baseline of an auto upgrade does not pay for the router's own cache rewrite", async () => {
+  const upstream = createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ type: "message", content: [], stop_reason: "end_turn",
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 10000, cache_read_input_tokens: 0 } }));
+    });
+  });
+  const upstreamPort = await listen(upstream);
+  const ledgerPath = join(mkdtempSync(join(tmpdir(), "ledger-")), "ledger.jsonl");
+  let classified = 0;
+  const router = createProxyServer({
+    upstream: `http://127.0.0.1:${upstreamPort}`,
+    ledgerPath,
+    classify: async () => (++classified === 1 ? sonnet() : veryHard()),
+  });
+  const post = poster(await listen(router));
+  const sonnetModel = DEFAULT_PRICING.modelAlias.sonnet;
+  await post(sonnetModel, [startHistory[0]]);
+  await post(sonnetModel, [...startHistory, hardPrompt]);
+  const line = readLedger(ledgerPath)[1];
+  assert.equal(line.decision, "upgraded");
+  const readCost = (10000 * DEFAULT_PRICING.rates.sonnet.cacheReadPerMTok) / 1e6;
+  assert.ok(Math.abs(line.counterfactualNoRoutingCostUsd! - readCost) < 1e-9);
+  router.close();
+  upstream.close();
 });

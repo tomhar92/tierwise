@@ -7,8 +7,8 @@ const store = new WeakMap<object, ConversationState>();
 // Anthropic's API sends no session id, and Claude Code opens new TCP
 // connections mid-conversation (and shares one between the main thread and
 // subagents), so a socket is a poor identity: a fresh connection looked
-// like a brand-new conversation, which is a reset, which let an upgrade
-// through that the policy says is only ever a suggestion. A conversation
+// like a brand-new conversation, which is a reset, which let a switch
+// through that the mid-session rules would have held back. A conversation
 // is identified by its first message instead. It is stable for the life
 // of a session, and `/clear`, `/compact` and every new subagent start
 // with a different one.

@@ -194,3 +194,12 @@ test("a user who already has a status line keeps it: no --settings is passed", a
   });
   assert.deepEqual(JSON.parse(readFileSync(out, "utf8")), ["-p"]);
 });
+
+test("an invalid upgrade setting is reported at startup, without stopping the router", async () => {
+  const { validateStartupConfig, reportStartupProblems } = await import("../src/server.js");
+  const env = { TYPESAFE_API_KEY: "k", ROUTER_MAX_TIER: "opus", ROUTER_UPGRADE_MODE: "off" };
+  const problems = validateStartupConfig(env);
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /ROUTER_UPGRADE_MODE.*automatic upgrades are off/);
+  assert.equal(reportStartupProblems(env), false);
+});
