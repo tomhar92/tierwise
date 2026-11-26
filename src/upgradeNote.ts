@@ -27,3 +27,13 @@ export function buildResetUpgradeNoticeText(to: Tier, from: Tier): string {
     `Run \`/model ${from}\` to switch back.*`
   );
 }
+
+/** A mid-session upgrade the router applied. The note can reach the user a few
+ * replies later, so it does not claim to describe the one it is attached to. */
+export function buildAutoUpgradeNoticeText(to: Tier, from: Tier, estimatedCostUsd: number): string {
+  return (
+    `\n\n---\n${NOTICE_MARKER} the router moved this conversation to ${to} from ${from}, ` +
+    `because a request looked like it needed it. Rebuilding the cache cost ` +
+    `about $${estimatedCostUsd.toFixed(2)} one time. Run \`/model ${from}\` to switch back.*`
+  );
+}

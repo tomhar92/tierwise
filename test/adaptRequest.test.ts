@@ -78,3 +78,20 @@ test("beta flags the tier rejects are removed; the rest are kept in order", () =
   assert.equal(adaptBetaHeader("effort-2025-11-24", "haiku"), null);
   assert.equal(adaptBetaHeader("effort-2025-11-24", "sonnet"), "effort-2025-11-24");
 });
+
+// A Haiku-shaped request asks for a thinking budget, which the Sonnet, Opus and
+// Fable tiers reject with a 400.
+test("moving a request up replaces a thinking budget with adaptive thinking", () => {
+  for (const tier of ["sonnet", "opus", "fable"] as const) {
+    const body: any = { max_tokens: 32000, thinking: { type: "enabled", budget_tokens: 31999 }, messages: [] };
+    adaptBodyForTier(body, tier);
+    assert.deepEqual(body.thinking, { type: "adaptive" }, tier);
+    assert.equal(body.max_tokens, 32000);
+  }
+});
+
+test("moving a request up drops a disabled thinking setting, which some tiers reject", () => {
+  const body: any = { max_tokens: 32000, thinking: { type: "disabled" }, messages: [] };
+  adaptBodyForTier(body, "opus");
+  assert.equal("thinking" in body, false);
+});

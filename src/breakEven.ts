@@ -67,3 +67,19 @@ export function breakEvenTurns(
   if (perTurnSavings <= 0) return Infinity;
   return tax / perTurnSavings;
 }
+
+/** What moving the conversation's history to another tier costs once: writing it
+ * to that tier's cache instead of reading it from the current one's. Unlike
+ * `switchTax` it leaves out the difference in the turn's own input and output
+ * prices, so a long previous reply does not make the move look expensive. */
+export function rebuildCost(
+  historyTokens: number,
+  currentTier: Tier,
+  candidateTier: Tier,
+  pricing: PricingConfig
+): number {
+  return (
+    computeCostUsd(pricing, candidateTier, 0, 0, historyTokens, 0) -
+    computeCostUsd(pricing, currentTier, 0, 0, 0, historyTokens)
+  );
+}

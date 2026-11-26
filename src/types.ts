@@ -76,6 +76,9 @@ export interface ConversationState {
    * to call a tool, and the rest of the loop is never classified, so the
    * note is held here until a reply ends normally. */
   pendingNotice?: string;
+  /** The waiting note reports a switch the router already made, so a later
+   * turn that leaves the model alone must not erase it. */
+  pendingNoticeApplied?: boolean;
   /** Set when this state was created because a request with a known first
    * message did not continue any tracked conversation. Logged once. */
   identityNote?: IdentityNote;
@@ -86,4 +89,7 @@ export type Decision =
   | { kind: "downgraded"; to: Tier; breakEvenTurns: number }
   | { kind: "downgraded-on-reset"; to: Tier }
   | { kind: "upgraded-on-reset"; to: Tier }
-  | { kind: "upgrade-suggested"; to: Tier; estimatedCostUsd: number };
+  | { kind: "upgrade-suggested"; to: Tier; estimatedCostUsd: number }
+  /** A mid-session upgrade applied to this turn: the classifier was sure
+   * enough, and the cache rebuild cheap enough, not to wait for the user. */
+  | { kind: "upgraded"; to: Tier; estimatedCostUsd: number };

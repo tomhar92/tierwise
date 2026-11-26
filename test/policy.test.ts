@@ -151,7 +151,7 @@ test("declines a shallow-drop downgrade (sonnet -> haiku) whose break-even excee
   assert.deepEqual(decision, { kind: "held" });
 });
 
-test("never auto-switches on an upgrade outside a reset window; suggests instead, with the real switch-tax as the estimated cost", () => {
+test("never auto-switches on an upgrade outside a reset window; suggests instead, with the cache rebuild as the estimated cost", () => {
   const classification: ClassifyResult = {
     choice: "opus",
     confidence: 0.7,
@@ -161,7 +161,10 @@ test("never auto-switches on an upgrade outside a reset window; suggests instead
   assert.equal(decision.kind, "upgrade-suggested");
   if (decision.kind === "upgrade-suggested") {
     assert.equal(decision.to, "opus");
-    assert.ok(Math.abs(decision.estimatedCostUsd - 0.1315) < 0.0005);
+    // 21,500 tokens of history written to opus instead of read from sonnet.
+    const { opus, sonnet } = DEFAULT_PRICING.rates;
+    const expected = (21_500 * (opus.cacheWritePerMTok - sonnet.cacheReadPerMTok)) / 1e6;
+    assert.ok(Math.abs(decision.estimatedCostUsd - expected) < 1e-9);
   }
 });
 
@@ -239,6 +242,9 @@ const LIMITS = {
   minTier: "haiku" as const,
   maxTier: "fable" as const,
   resetConfidenceFloor: 0.5,
+  upgradeMode: "auto" as const,
+  upgradeConfidence: 0.9,
+  upgradeMaxCostUsd: 1,
 };
 
 test("a reset holds when the classifier is not confident enough to spend on a switch", () => {
@@ -279,4 +285,113 @@ test("ROUTER_MAX_TIER keeps fable out of the non-reset upgrade candidates", () =
     maxTier: "opus",
   });
   assert.equal(decision.kind, "held");
+});
+
+// A mid-session upgrade is decided for the turn that just arrived, so a
+// suggestion shown after the reply helps nothing for it. When the classifier is
+// very sure, the turn runs on the higher tier and the user is told.
+const hardTurn = (confidence: number): ClassifyResult => ({
+  choice: "opus",
+  confidence,
+  probabilities: { haiku: 0.0, sonnet: 1 - confidence, opus: confidence, fable: 0 },
+});
+const sameHistory = [{ role: "user", content: "a" }, { role: "assistant", content: "b" }];
+const midSession = (overrides: Partial<ConversationState> = {}) =>
+  state({ currentTier: "sonnet", lastMark: markMessages(sameHistory), ...overrides });
+
+test("DEFAULT_LIMITS upgrade settings default to auto at 0.9 with a $1 rebuild cap, and read the environment", () => {
+  const defaults = readThresholds().DEFAULT_LIMITS;
+  assert.equal(defaults.upgradeMode, "auto");
+  assert.equal(defaults.upgradeConfidence, 0.9);
+  assert.equal(defaults.upgradeMaxCostUsd, 1);
+  const set = readThresholds({
+    ROUTER_UPGRADE_MODE: "suggest",
+    ROUTER_UPGRADE_CONFIDENCE: "0.95",
+    ROUTER_UPGRADE_MAX_COST_USD: "0.25",
+  }).DEFAULT_LIMITS;
+  assert.equal(set.upgradeMode, "suggest");
+  assert.equal(set.upgradeConfidence, 0.95);
+  assert.equal(set.upgradeMaxCostUsd, 0.25);
+  });
+
+test("a mid-session upgrade the classifier is very sure about runs this turn on the higher tier", () => {
+  const decision = decide(hardTurn(0.93), midSession(), sameHistory, DEFAULT_PRICING, DEFAULT_LIMITS);
+  assert.equal(decision.kind, "upgraded");
+  if (decision.kind === "upgraded") {
+    assert.equal(decision.to, "opus");
+    assert.ok(decision.estimatedCostUsd > 0);
+  }
+});
+
+test("below the confidence threshold it is still only a suggestion", () => {
+  const decision = decide(hardTurn(0.85), midSession(), sameHistory, DEFAULT_PRICING, DEFAULT_LIMITS);
+  assert.equal(decision.kind, "upgrade-suggested");
+});
+
+test("the confidence threshold is configurable", () => {
+  const lenient = { ...DEFAULT_LIMITS, upgradeConfidence: 0.8 };
+  assert.equal(decide(hardTurn(0.85), midSession(), sameHistory, DEFAULT_PRICING, lenient).kind, "upgraded");
+  const strict = { ...DEFAULT_LIMITS, upgradeConfidence: 0.99 };
+  assert.equal(decide(hardTurn(0.93), midSession(), sameHistory, DEFAULT_PRICING, strict).kind, "upgrade-suggested");
+});
+
+test("suggest mode never upgrades on its own, however sure the classifier is", () => {
+  const decision = decide(hardTurn(0.99), midSession(), sameHistory, DEFAULT_PRICING, { ...DEFAULT_LIMITS, upgradeMode: "suggest" });
+  assert.equal(decision.kind, "upgrade-suggested");
+});
+
+test("an upgrade whose cache rebuild costs more than the cap stays a suggestion", () => {
+  const big = midSession({ lastPrefixTokens: 400_000 });
+  const capped = decide(hardTurn(0.95), big, sameHistory, DEFAULT_PRICING, { ...DEFAULT_LIMITS, upgradeMaxCostUsd: 1 });
+  assert.equal(capped.kind, "upgrade-suggested");
+  const uncapped = decide(hardTurn(0.95), big, sameHistory, DEFAULT_PRICING, { ...DEFAULT_LIMITS, upgradeMaxCostUsd: 100 });
+  assert.equal(uncapped.kind, "upgraded");
+});
+
+test("a conversation the user pinned with /model is only ever offered the upgrade", () => {
+  const decision = decide(hardTurn(0.97), midSession({ pinnedByUser: true }), sameHistory, DEFAULT_PRICING, DEFAULT_LIMITS);
+  assert.equal(decision.kind, "upgrade-suggested");
+});
+
+test("an auto upgrade never goes above ROUTER_MAX_TIER", () => {
+  const fableTurn: ClassifyResult = {
+    choice: "fable",
+    confidence: 0.95,
+    probabilities: { haiku: 0, sonnet: 0.05, opus: 0.2, fable: 0.75 },
+  };
+  const decision = decide(fableTurn, midSession(), sameHistory, DEFAULT_PRICING, { ...DEFAULT_LIMITS, maxTier: "opus" });
+  assert.equal(decision.kind, "upgraded");
+  assert.equal(decision.kind === "upgraded" && decision.to, "opus");
+});
+
+test("any invalid upgrade setting turns automatic upgrades off rather than spending on a guess", () => {
+  const invalid: Record<string, string>[] = [
+    { ROUTER_UPGRADE_MODE: "off" },
+    { ROUTER_UPGRADE_MODE: "sugest" },
+    { ROUTER_UPGRADE_MAX_COST_USD: "$0.25" },
+    { ROUTER_UPGRADE_MAX_COST_USD: "-1" },
+    { ROUTER_UPGRADE_CONFIDENCE: "-1" },
+    { ROUTER_UPGRADE_CONFIDENCE: "95" },
+    { ROUTER_UPGRADE_CONFIDENCE: "high" },
+  ];
+  for (const env of invalid) {
+    assert.equal(readThresholds(env).DEFAULT_LIMITS.upgradeMode, "suggest", JSON.stringify(env));
+  }
+});
+
+// 8: the cap and the note speak of the cache rebuild, not of how pricey the last reply was.
+test("a long previous reply does not make the cache rebuild look expensive", () => {
+  const small = midSession({ lastPrefixTokens: 20_000, lastNewTokens: 0, lastOutputTokens: 0 });
+  const longReply = midSession({ lastPrefixTokens: 0, lastNewTokens: 0, lastOutputTokens: 20_000 });
+  const a = decide(hardTurn(0.95), small, sameHistory, DEFAULT_PRICING, DEFAULT_LIMITS);
+  const b = decide(hardTurn(0.95), longReply, sameHistory, DEFAULT_PRICING, DEFAULT_LIMITS);
+  assert.equal(a.kind, "upgraded");
+  assert.equal(b.kind, "upgraded");
+  if (a.kind === "upgraded" && b.kind === "upgraded") {
+    // Both leave 20k tokens of history to rewrite.
+    assert.ok(Math.abs(a.estimatedCostUsd - b.estimatedCostUsd) < 1e-9);
+    const { rates } = DEFAULT_PRICING;
+    const expected = (20_000 * (rates.opus.cacheWritePerMTok - rates.sonnet.cacheReadPerMTok)) / 1e6;
+    assert.ok(Math.abs(a.estimatedCostUsd - expected) < 1e-9);
+  }
 });

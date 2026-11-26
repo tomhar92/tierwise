@@ -162,3 +162,14 @@ test("the launcher warns, without printing values, when the environment override
   assert.match(run.stderr, /TYPESAFE_API_KEY.*environment.*overrides/);
   assert.doesNotMatch(run.stderr, /env-key-value|file-key-value/);
 });
+
+test("the upgrade settings are validated", () => {
+  assert.equal(validateSetting("ROUTER_UPGRADE_MODE", "auto"), null);
+  assert.equal(validateSetting("ROUTER_UPGRADE_MODE", "Suggest"), null);
+  assert.match(validateSetting("ROUTER_UPGRADE_MODE", "always")!, /auto or suggest/);
+  assert.equal(validateSetting("ROUTER_UPGRADE_CONFIDENCE", "0.9"), null);
+  assert.match(validateSetting("ROUTER_UPGRADE_CONFIDENCE", "90")!, /0 to 1/);
+  assert.match(validateSetting("ROUTER_UPGRADE_CONFIDENCE", "high")!, /0 to 1/);
+  assert.equal(validateSetting("ROUTER_UPGRADE_MAX_COST_USD", "0.5"), null);
+  assert.match(validateSetting("ROUTER_UPGRADE_MAX_COST_USD", "-1")!, /0 or more/);
+});

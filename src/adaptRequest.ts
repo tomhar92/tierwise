@@ -11,8 +11,8 @@ import type { Tier } from "./types.js";
 // The router only swaps the `model` field, so when it moves a request onto
 // a tier with a narrower surface it has to reshape the rest the same way,
 // or Anthropic answers 400 ("role 'system' is not supported on this model").
-// These are Claude Code implementation details and will drift; a tier with
-// no entry is left untouched.
+// These are Claude Code implementation details and will drift; for a tier with
+// no entry only the thinking setting is changed.
 interface TierProfile {
   maxTokens: number;
   strippedBetas: readonly string[];
@@ -74,9 +74,21 @@ function foldSystemMessages(messages: Message[]): Message[] {
   return out;
 }
 
+// The other direction: a request built for Haiku asks for a thinking budget,
+// which the tiers above it reject in favour of adaptive thinking, and some of
+// them reject "disabled" too, so that setting is left to the tier's default.
+function adaptThinkingUpward(body: Record<string, unknown>): void {
+  const type = (body.thinking as { type?: unknown } | undefined)?.type;
+  if (type === "enabled") body.thinking = { type: "adaptive" };
+  else if (type === "disabled") delete body.thinking;
+}
+
 export function adaptBodyForTier(body: Record<string, unknown>, tier: Tier): void {
   const profile = PROFILES[tier];
-  if (!profile) return;
+  if (!profile) {
+    adaptThinkingUpward(body);
+    return;
+  }
 
   if (typeof body.max_tokens === "number" && body.max_tokens > profile.maxTokens) {
     body.max_tokens = profile.maxTokens;

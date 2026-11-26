@@ -102,3 +102,18 @@ export function sanitizeForClassifier(messages: unknown[]): JsonValue[] {
 
   return messages.map(take);
 }
+
+/** True for the user message Claude Code records when `/model` is run. */
+export function isModelCommand(message: unknown): boolean {
+  const { role, content } = (message ?? {}) as { role?: unknown; content?: unknown };
+  if (role !== "user") return false;
+  const blocks = typeof content === "string" ? [{ text: content }] : Array.isArray(content) ? content : [];
+  return blocks.some((block) => {
+    const text = (block as { text?: unknown } | null)?.text;
+    return (
+      typeof text === "string" &&
+      /^\s*<command-(name|message)>/.test(text) &&
+      text.includes("<command-name>/model</command-name>")
+    );
+  });
+}

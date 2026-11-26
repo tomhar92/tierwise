@@ -1,5 +1,7 @@
 import { anthropicErrorBody, describeNetworkError, OutageLog } from "./networkError.js";
+import { invalidUpgradeSettings } from "./config.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { newMessagesSince } from "./reset.js";
 import { createConversationStore, updateState } from "./conversationKey.js";
 import type { ConversationStore } from "./conversationKey.js";
 import { decide, DEFAULT_LIMITS, type PolicyLimits } from "./policy.js";
@@ -14,8 +16,9 @@ import {
   isSideRequest,
   isToolResultContinuation,
   sanitizeForClassifier,
+  isModelCommand,
 } from "./classifyInput.js";
-import { buildResetUpgradeNoticeText, buildUpgradeNoticeText } from "./upgradeNote.js";
+import { buildAutoUpgradeNoticeText, buildResetUpgradeNoticeText, buildUpgradeNoticeText } from "./upgradeNote.js";
 import { SseNoteInjector, injectNoteIntoJsonResult } from "./responseNote.js";
 import { UsageAccumulator, type UsageTotals } from "./usage.js";
 import { isMainModule } from "./isMainModule.js";
@@ -475,7 +478,12 @@ export async function handleMessages(
   // stop being recognized as a manual change and fall back to pure
   // policy-driven routing instead of honoring it.
   const previousTier = state.currentTier;
-  const userChangedModel = requestedTier !== state.lastRequestedTier;
+  // Re-selecting the model Claude Code already asks for changes nothing in the
+  // request except the command it leaves in the history, and it is how the user
+  // takes back a conversation the router moved.
+  const userChangedModel =
+    requestedTier !== state.lastRequestedTier ||
+    (state.lastMark.count > 0 && newMessagesSince(state.lastMark, messages).some(isModelCommand));
   if (userChangedModel) {
     state.currentTier = requestedTier;
   }
@@ -528,9 +536,10 @@ export async function handleMessages(
   const isSwitch =
     decision.kind === "downgraded" ||
     decision.kind === "downgraded-on-reset" ||
-    decision.kind === "upgraded-on-reset";
+    decision.kind === "upgraded-on-reset" ||
+    decision.kind === "upgraded";
 
-  // A "held" (or upgrade-suggested, which never auto-switches) decision
+  // A "held" (or upgrade-suggested, which leaves the switch to the user) decision
   // means: stay on the tier the router already put this conversation on,
   // not "revert to whatever Claude Code's own request happens to say" -
   // Claude Code keeps resending its own default every turn, so falling
@@ -562,24 +571,44 @@ export async function handleMessages(
   // choosing to repeat it. A note is decided here, on the classified
   // request, but kept on the conversation until a reply ends normally:
   // that reply is often several tool-result requests later, and those are
-  // never classified. A newly classified turn replaces whatever was
-  // waiting, and a manual /model change cancels it.
+  // never classified. A newly classified turn replaces a waiting suggestion.
+  // A note about a switch the router already made waits until it is shown, or
+  // until the conversation moves again or the user picks a model.
+  const waiting = state.pendingNotice;
+  let notice = waiting;
+  let applied = state.pendingNoticeApplied === true;
   if (manualSwitch) {
-    state.pendingNotice = undefined;
+    notice = undefined;
+    applied = false;
   } else if (classification) {
-    state.pendingNotice =
-      decision.kind === "upgrade-suggested"
-        ? buildUpgradeNoticeText(decision.to, decision.estimatedCostUsd)
-        : decision.kind === "upgraded-on-reset" && decision.to !== requestedTier
-          ? buildResetUpgradeNoticeText(decision.to, requestedTier)
+    const appliedNotice =
+      decision.kind === "upgraded-on-reset" && decision.to !== requestedTier
+        ? buildResetUpgradeNoticeText(decision.to, requestedTier)
+        : decision.kind === "upgraded"
+          ? buildAutoUpgradeNoticeText(decision.to, previousTier, decision.estimatedCostUsd)
           : undefined;
+    if (appliedNotice) {
+      notice = appliedNotice;
+      applied = true;
+    } else if (!applied || isSwitch) {
+      notice =
+        decision.kind === "upgrade-suggested"
+          ? buildUpgradeNoticeText(decision.to, decision.estimatedCostUsd)
+          : undefined;
+      applied = false;
+    }
   }
-  const notice = state.pendingNotice;
 
   const { response: upstreamResponse, usage, noticeShown } = await forwardAndStream(
     req, res, body, upstream, signal, targetTier !== requestedTier ? targetTier : undefined, notice
   );
-  if (noticeShown && state.pendingNotice === notice) state.pendingNotice = undefined;
+  // Only a turn that happened changes what is waiting: a note about a switch
+  // whose request failed would describe something that never took place. A
+  // request that ran meanwhile and left a newer note keeps it.
+  if (upstreamResponse.ok && state.pendingNotice === waiting) {
+    state.pendingNotice = noticeShown ? undefined : notice;
+    state.pendingNoticeApplied = !noticeShown && applied;
+  }
 
   const actualModel = outgoingModel;
   const actualTier = tierForModel(pricing, actualModel) ?? targetTier;
@@ -613,8 +642,8 @@ export async function handleMessages(
     );
 
     // The counterfactual answers "what would this turn have cost with no
-    // router at all", i.e. staying on `requestedTier` forever. A plain
-    // "downgraded" decision is the one case where *this turn's* cache-write
+    // router at all", i.e. staying on `requestedTier` forever. A mid-session
+    // switch ("downgraded" or "upgraded") is where *this turn's* cache-write
     // tokens exist only because the router itself just switched models - in
     // the no-router world the session never left `requestedTier`, so that
     // prefix would still have been warm (a cache *read*, at requestedTier's
@@ -622,7 +651,7 @@ export async function handleMessages(
     // get this treatment: the reset (session start, `/clear`, `/compact`)
     // invalidates the cache regardless of the router, so the no-router world
     // pays that same rebuild too.
-    const routerCausedRebuild = decision.kind === "downgraded";
+    const routerCausedRebuild = decision.kind === "downgraded" || decision.kind === "upgraded";
     const counterfactualCacheReadTokens = routerCausedRebuild
       ? usage.cacheReadTokens + usage.cacheCreationTokens
       : usage.cacheReadTokens;
@@ -783,6 +812,9 @@ export function validateStartupConfig(env: NodeJS.ProcessEnv): string[] {
     problems.push(
       "No ROUTER_MAX_TIER: nothing caps autonomous spend. Set ROUTER_MAX_TIER=opus unless you mean to allow fable."
     );
+  }
+  for (const problem of invalidUpgradeSettings(env)) {
+    problems.push(`${problem}; automatic upgrades are off until it is fixed`);
   }
   return problems;
 }

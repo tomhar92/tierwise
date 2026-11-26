@@ -20,10 +20,13 @@ This router is built around that constraint:
   projected savings clear the one-time switch tax within a conservative
   number of turns.
 - **Upgrades** (to a pricier tier) are applied at those same reset
-  moments, when the classifier is confident enough. Mid-session they are
-  never applied automatically: the router appends a note under the model's
-  reply with the estimated cost and the `/model` command, and it's your
-  call whether to act on it.
+  moments, when the classifier is confident enough. Mid-session an upgrade
+  runs on the turn that needs it only when the classifier is very sure
+  (`ROUTER_UPGRADE_CONFIDENCE`, 0.9), rebuilding the cache costs no more than
+  `ROUTER_UPGRADE_MAX_COST_USD` ($1) and you have not picked the model
+  yourself. Otherwise the router appends a note under the model's reply with
+  the estimated cost and the `/model` command, and it's your call. Set
+  `ROUTER_UPGRADE_MODE=suggest` to have every mid-session upgrade left to you.
 - Both are free to apply immediately at the moments the cache was going
   to be rebuilt anyway (session start, `/clear`, `/compact`).
 - Every turn's *real* token usage and cost gets logged, so you can
@@ -197,7 +200,8 @@ variable always overrides the file. `TIERWISE_CONFIG` moves the file.
 The file accepts `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`,
 `TYPESAFE_DEFAULT_MODEL`, `ROUTER_MARGIN_THRESHOLD`,
 `ROUTER_STICKY_ASSUMPTION`, `ROUTER_RESET_CONFIDENCE_FLOOR`,
-`ROUTER_MIN_TIER`, `ROUTER_MAX_TIER` and `ROUTER_LEDGER_PATH`.
+`ROUTER_MIN_TIER`, `ROUTER_MAX_TIER`, `ROUTER_UPGRADE_MODE`, `ROUTER_UPGRADE_CONFIDENCE`,
+`ROUTER_UPGRADE_MAX_COST_USD` and `ROUTER_LEDGER_PATH`.
 
 | Env var | Purpose | Default |
 | --- | --- | --- |
@@ -205,6 +209,9 @@ The file accepts `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`,
 | `TYPESAFE_BASE_URL` | Classifier API root; any `/v1/systemone`-compatible server | `https://api.typesafe.ai` |
 | `TYPESAFE_DEFAULT_MODEL` | Classifier model name sent to that server | `jev-latest` |
 | `TYPESAFE_PRICE_IN_PER_MTOK` / `TYPESAFE_PRICE_OUT_PER_MTOK` | USD per million classifier input / output tokens, used to price the classifier's own cost | `0.042` / `0` on the hosted API (typesafe.ai lists $42 per billion input tokens, no output price); `0` on a self-hosted `TYPESAFE_BASE_URL` |
+| `ROUTER_UPGRADE_MODE` | `auto` runs a mid-session upgrade on the turn that needs it when the classifier is very sure; `suggest` only offers it after the reply | `auto` |
+| `ROUTER_UPGRADE_CONFIDENCE` | Classifier confidence an automatic upgrade needs (0-1) | `0.9` |
+| `ROUTER_UPGRADE_MAX_COST_USD` | An upgrade whose one-time cache rebuild costs more than this stays a suggestion. An invalid value in any upgrade setting turns automatic upgrades off | `1` |
 | `ROUTER_LEDGER_PATH` | Where turn-by-turn cost data is logged | `./router-ledger.jsonl` |
 | `PORT` | Local proxy port | `8787` |
 | `HOST` | Interface the proxy binds to | `127.0.0.1` |
@@ -253,16 +260,20 @@ numbers from the report.
   Haiku turns start returning 400s, set `ROUTER_MIN_TIER=sonnet`.
 - Router notes are added to the reply as an extra text block, and only on
   a reply that ends normally, never on one that stops to call a tool. There
-  are two: an upgrade *suggestion* (you decide) and a notice that the router
-  *applied* an upgrade at a reset (with the `/model` command to go back).
+  are two kinds: an upgrade *suggestion* (you decide) and a notice that the
+  router *applied* an upgrade, at a reset or mid-session (with the `/model`
+  command to go back).
   The decision is made when your message arrives, but that reply is usually
   a tool call, so the note is held on the conversation and shown on the
   reply that finishes the turn, once. A newer decision replaces a waiting
-  note, and changing the model yourself cancels it. Claude Code keeps it in
+  suggestion, while a notice of an applied upgrade waits until it is shown or
+  the model changes again. Changing the model yourself cancels either. Claude Code keeps it in
   the conversation history like any other assistant text. The request itself
   is never modified for it, so it does not touch the cache. Notes are left
   out of what is sent to the classifier.
-- When you change the model yourself (`/model ...`), that turn is honored
+- When you change the model yourself (`/model ...`, even to the model Claude
+  Code already asks for, which is how you take back a conversation the router
+  moved), that turn is honored
   as-is and not classified (ledger decision `manual-switch`), and the
   conversation is pinned to your choice: the router will not automatically
   move it to a cheaper tier afterwards, though it may still suggest an
