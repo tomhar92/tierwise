@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { countModelCommands } from "./classifyInput.js";
 import type { IdentityNote, MessageMark } from "./types.js";
 
 // Claude Code moves the `cache_control` breakpoint marker onto whichever
@@ -39,12 +40,21 @@ function canonicalBlock(block: unknown): unknown {
   return block;
 }
 
+// Claude Code removes the previous model's thinking blocks from the history when
+// the model changes, so they cannot be part of what identifies a conversation.
+function isThinking(block: unknown): boolean {
+  const type = (block as { type?: unknown } | null)?.type;
+  return type === "thinking" || type === "redacted_thinking";
+}
+
 export function canonicalMessage(message: unknown): unknown {
   const stripped = stripCacheControl(message);
   if (!stripped || typeof stripped !== "object") return stripped;
   const { content } = stripped as { content?: unknown };
   if (typeof content === "string") return { ...stripped, content: [{ type: "text", text: content }] };
-  if (Array.isArray(content)) return { ...stripped, content: content.map(canonicalBlock) };
+  if (Array.isArray(content)) {
+    return { ...stripped, content: content.filter((block) => !isThinking(block)).map(canonicalBlock) };
+  }
   return stripped;
 }
 
@@ -88,6 +98,7 @@ export function markMessages(messages: unknown[]): MessageMark {
     prefixDigest: digestPrefix(messages, Math.max(messages.length - 1, 0)),
     digests: messages.map((message) => shortHash(message)),
     shapes: messages.map(shapeOf),
+    modelCommands: countModelCommands(messages),
   };
 }
 
@@ -127,10 +138,7 @@ export function detectReset(last: MessageMark | undefined, currentMessages: unkn
   return digestPrefix(currentMessages, last.count - 1) !== last.prefixDigest;
 }
 
-/** The messages a request adds to what `last` recorded, including the newest
- * recorded one if something else has taken its place. */
-export function newMessagesSince(last: MessageMark, currentMessages: unknown[]): unknown[] {
-  return currentMessages.filter(
-    (message, i) => i >= last.count || (i === last.count - 1 && shortHash(message) !== last.digests?.[i])
-  );
+/** True when the user has run `/model` since `last` was recorded. */
+export function ranModelCommandSince(last: MessageMark, currentMessages: unknown[]): boolean {
+  return last.count > 0 && countModelCommands(currentMessages) > (last.modelCommands ?? 0);
 }

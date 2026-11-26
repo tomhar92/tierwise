@@ -136,3 +136,49 @@ test("a prompt that turns from a list into a string stays one conversation in th
     upstream.close();
   }
 });
+
+// What Claude Code does on `/model`: it removes the previous model's thinking
+// blocks from earlier replies, records the command, and may reshape other
+// messages for the new model. It is still the same conversation.
+const thought = { type: "thinking", thinking: "hmm", signature: "s" };
+const call = { type: "tool_use", id: "t1", name: "Read", input: {} };
+const toolResultB = { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "A" }] };
+const command = {
+  role: "user",
+  content: [{ type: "text", text: "<command-name>/model</command-name>\n<command-args>haiku</command-args>" }],
+};
+
+test("removing thinking blocks from earlier replies does not lose the conversation", () => {
+  const store = createConversationStore();
+  const state = seed(store, [first, { role: "assistant", content: [thought, call] }, toolResultB]);
+  const after = [
+    first,
+    { role: "assistant", content: [call] },
+    toolResultB,
+    { role: "assistant", content: [{ type: "text", text: "done" }] },
+    { role: "user", content: "next" },
+  ];
+  assert.equal(store.getOrInitState({}, "haiku", after), state);
+});
+
+test("a new /model command keeps the conversation even when earlier messages were reshaped", () => {
+  const store = createConversationStore();
+  const state = seed(store, [first, reply, toolResultB]);
+  const reshaped = [
+    first,
+    { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Read", input: { reshaped: true } }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "A" }, { type: "text", text: "folded reminder" }] },
+    { role: "assistant", content: "done" },
+    command,
+    { role: "user", content: "next" },
+  ];
+  assert.equal(store.getOrInitState({}, "haiku", reshaped), state);
+});
+
+test("an old /model command does not excuse a later edit of the history", () => {
+  const store = createConversationStore();
+  const history = [first, reply, command, { role: "user", content: "q" }, { role: "assistant", content: "a" }];
+  const state = seed(store, history);
+  const edited = [first, { role: "assistant", content: "rewritten" }, command, { role: "user", content: "q2" }];
+  assert.notEqual(store.getOrInitState({}, "sonnet", edited), state);
+});

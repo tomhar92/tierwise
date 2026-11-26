@@ -1,7 +1,7 @@
 import { anthropicErrorBody, describeNetworkError, OutageLog } from "./networkError.js";
 import { invalidUpgradeSettings } from "./config.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { newMessagesSince } from "./reset.js";
+import { ranModelCommandSince } from "./reset.js";
 import { createConversationStore, updateState } from "./conversationKey.js";
 import type { ConversationStore } from "./conversationKey.js";
 import { decide, DEFAULT_LIMITS, type PolicyLimits } from "./policy.js";
@@ -16,7 +16,6 @@ import {
   isSideRequest,
   isToolResultContinuation,
   sanitizeForClassifier,
-  isModelCommand,
 } from "./classifyInput.js";
 import { buildAutoUpgradeNoticeText, buildResetUpgradeNoticeText, buildUpgradeNoticeText } from "./upgradeNote.js";
 import { SseNoteInjector, injectNoteIntoJsonResult } from "./responseNote.js";
@@ -482,8 +481,7 @@ export async function handleMessages(
   // request except the command it leaves in the history, and it is how the user
   // takes back a conversation the router moved.
   const userChangedModel =
-    requestedTier !== state.lastRequestedTier ||
-    (state.lastMark.count > 0 && newMessagesSince(state.lastMark, messages).some(isModelCommand));
+    requestedTier !== state.lastRequestedTier || ranModelCommandSince(state.lastMark, messages);
   if (userChangedModel) {
     state.currentTier = requestedTier;
   }
